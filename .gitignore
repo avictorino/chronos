@@ -1,0 +1,34 @@
+# --- Python (ingestion/) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.uv/
+
+# runtime data (checkpoints, local sqlite, logs)
+ingestion/.data/
+*.db
+*.sqlite3
+
+# env files with secrets
+.env
+*.env.local
+
+# --- Node / Firebase (frontend/, futuro) ---
+node_modules/
+dist/
+build/
+.firebase/
+.firebaserc.local
+firebase-debug.log
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

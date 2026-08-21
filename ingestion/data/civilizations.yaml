@@ -1,0 +1,41 @@
+# Seed list of civilizations to ingest.
+#
+# These dates are approximate seeds only, not historical authority — the LLM
+# may return more refined/disputed ranges when it extracts the CivilizationProfile.
+# Years are astronomical/BCE-negative: 701 BCE = -701, 70 CE = 70.
+
+civilizations:
+  - id: sumer
+    name: Sumer
+    approximate_start_year: -4500
+    approximate_end_year: -1900
+
+  - id: akkadian_empire
+    name: Akkadian Empire
+    approximate_start_year: -2334
+    approximate_end_year: -2154
+
+  - id: ancient_egypt
+    name: Ancient Egypt
+    approximate_start_year: -3100
+    approximate_end_year: -30
+
+  - id: assyria
+    name: Assyria
+    approximate_start_year: -2500
+    approximate_end_year: -609
+
+  - id: babylon
+    name: Babylon
+    approximate_start_year: -1894
+    approximate_end_year: -539
+
+  - id: ancient_greece
+    name: Ancient Greece
+    approximate_start_year: -1600
+    approximate_end_year: -146
+
+  - id: roman_civilization
+    name: Ancient Rome
+    approximate_start_year: -753
+    approximate_end_year: 476
