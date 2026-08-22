@@ -15,8 +15,8 @@ import json
 import sys
 
 from app.config import get_settings
-from app.persistence.neo4j import Neo4jConnection
-from app.persistence.schema import ensure_constraints
+from app.persistence.postgres import PostgresConnection
+from app.persistence.schema import ensure_schema
 from app.services.civilization_service import load_civilizations
 from app.services.ingestion_service import run_ingestion
 from app.utils.logging import configure_logging, get_logger
@@ -41,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--dry-run", action="store_true", help="Call the LLM and print results, write nothing")
     ingest.add_argument("--resume", metavar="RUN_ID", default=None, help="Resume an interrupted run by its id")
 
-    subparsers.add_parser("init-schema", help="Create Neo4j constraints/indexes, then exit")
+    subparsers.add_parser("init-schema", help="Create Postgres extension/tables/indexes, then exit")
 
     return parser
 
@@ -71,29 +71,38 @@ async def _cmd_ingest(args: argparse.Namespace) -> None:
     if args.resume and len(civilization_ids) > 1:
         raise SystemExit("--resume requires a single --civilization, not --all")
 
+    failures: list[str] = []
     for civilization_id in civilization_ids:
-        final_state = await run_ingestion(
-            civilization_id,
-            settings=settings,
-            dry_run=args.dry_run,
-            resume_run_id=args.resume,
-            max_events=args.max_events,
-            max_people=args.max_people,
-            max_places=args.max_places,
-        )
+        try:
+            final_state = await run_ingestion(
+                civilization_id,
+                settings=settings,
+                dry_run=args.dry_run,
+                resume_run_id=args.resume,
+                max_events=args.max_events,
+                max_people=args.max_people,
+                max_places=args.max_places,
+            )
+        except Exception as exc:  # noqa: BLE001 - one civilization's crash shouldn't stop --all
+            failures.append(civilization_id)
+            log.error("INGESTION", f"{civilization_id}: run crashed, continuing with the rest", error=str(exc))
+            continue
         if args.dry_run:
             _print_dry_run_result(civilization_id, final_state)
         if final_state.get("errors"):
             log.warning("INGESTION", f"{civilization_id}: {len(final_state['errors'])} item(s) failed")
 
+    if failures:
+        log.error("INGESTION", f"{len(failures)} civilization(s) crashed entirely: {', '.join(failures)}")
+
 
 async def _cmd_init_schema() -> None:
     settings = get_settings()
-    conn = Neo4jConnection(settings)
+    conn = PostgresConnection(settings)
     await conn.verify_connectivity()
-    await ensure_constraints(conn)
+    await ensure_schema(conn)
     await conn.close()
-    log.info("NEO4J", "Schema initialized")
+    log.info("POSTGRES", "Schema initialized")
 
 
 def main(argv: list[str] | None = None) -> int:

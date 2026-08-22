@@ -12,7 +12,7 @@ from app.domain.schemas import CivilizationSeed
 from app.graph.state import GraphDeps, IngestionState
 from app.graph.workflow import DEFAULT_RECURSION_LIMIT, build_workflow
 from app.llm import build_embedding_client, build_llm_client
-from app.persistence.neo4j import Neo4jConnection
+from app.persistence.postgres import PostgresConnection
 from app.persistence.repositories import (
     ChunkRepository,
     ClaimRepository,
@@ -21,7 +21,7 @@ from app.persistence.repositories import (
     IngestionRunRepository,
     RelationshipRepository,
 )
-from app.persistence.schema import ensure_constraints
+from app.persistence.schema import ensure_schema
 from app.services.civilization_service import get_civilization
 from app.utils.ids import new_run_id
 from app.utils.logging import get_logger
@@ -30,7 +30,7 @@ log = get_logger("ingestion")
 
 
 class _NullRepo:
-    """Read-only fallback used when --dry-run runs without a reachable Neo4j:
+    """Read-only fallback used when --dry-run runs without a reachable Postgres:
     find_candidates() returns no matches (entity resolution just says
     'create'), and every write method is a no-op — nodes.py already gates all
     writes behind `if not deps.dry_run`, so these should never actually fire."""
@@ -72,23 +72,25 @@ def _initial_state(seed: CivilizationSeed) -> IngestionState:
     )
 
 
-async def _build_deps(settings: Settings, *, dry_run: bool, run_id: str) -> tuple[GraphDeps, Neo4jConnection | None]:
+async def _build_deps(
+    settings: Settings, *, dry_run: bool, run_id: str
+) -> tuple[GraphDeps, PostgresConnection | None]:
     llm_client = build_llm_client(settings)
     embedding_client = build_embedding_client(settings)
     model_name = settings.ollama_model if settings.llm_provider == "ollama" else settings.openai_model
 
-    conn: Neo4jConnection | None = Neo4jConnection(settings)
+    conn: PostgresConnection | None = PostgresConnection(settings)
     try:
         await conn.verify_connectivity()
         if not dry_run:
-            await ensure_constraints(conn)
+            await ensure_schema(conn)
     except Exception as exc:
         if not dry_run:
             raise RuntimeError(
-                "Could not connect to Neo4j. Run `docker compose up -d` from the repo root, "
-                "or use --dry-run to iterate on prompts without it."
+                "Could not connect to Postgres. Check POSTGRES_DSN in .env points at your "
+                "local instance, or use --dry-run to iterate on prompts without it."
             ) from exc
-        log.warning("NEO4J", "Not reachable — dry-run will skip entity-resolution lookups", error=str(exc))
+        log.warning("POSTGRES", "Not reachable — dry-run will skip entity-resolution lookups", error=str(exc))
         conn = None
 
     entity_repo = EntityRepository(conn) if conn else _NullRepo()

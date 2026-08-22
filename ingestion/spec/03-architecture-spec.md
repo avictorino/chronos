@@ -13,7 +13,7 @@ LangGraph workflow (app/graph/workflow.py + nodes.py + state.py)
    │
    ├──▶ LLMClient / EmbeddingClient (app/llm.py)        — Ollama or OpenAI
    ├──▶ entity_resolution.resolve_entity (app/services/entity_resolution.py)
-   └──▶ Repositories (app/persistence/repositories.py) ──▶ Neo4j
+   └──▶ Repositories (app/persistence/repositories.py) ──▶ Postgres + pgvector
 ```
 
 ## Stack e versões-alvo
@@ -24,7 +24,7 @@ LangGraph workflow (app/graph/workflow.py + nodes.py + state.py)
 | `langgraph-checkpoint-sqlite` | `AsyncSqliteSaver` |
 | `pydantic` (>=2.9) | Modelos de domínio e contratos de LLM |
 | `pydantic-settings` | `Settings` a partir de `.env` |
-| `neo4j` (>=5.28) | Driver oficial (não usar `neo4j-driver`, deprecado) |
+| `asyncpg` (>=0.30) | Driver Postgres assíncrono |
 | `ollama` | Cliente oficial para o provider local |
 | `openai` | Cliente oficial para o provider hospedado |
 | `tenacity` | Retry com backoff |
@@ -32,11 +32,11 @@ LangGraph workflow (app/graph/workflow.py + nodes.py + state.py)
 | `pyyaml` | Leitura de `data/civilizations.yaml` |
 | `pytest` / `pytest-asyncio` | Testes |
 
-Gerenciado via `uv` (`uv sync`, `uv run ...`).
+Gerenciado via `uv` (`uv sync`, `uv run ...`). Postgres precisa ter a extensão `vector` instalável (`CREATE EXTENSION IF NOT EXISTS vector` — `init-schema` faz isso; a imagem `pgvector/pgvector:pg16` do `docker-compose.yml` já vem com a extensão compilada).
 
 ## Variáveis de `.env`
 
-Ver `.env.example` na raiz de `ingestion/` — cobre `LLM_PROVIDER`, `OLLAMA_*`, `OPENAI_*`, `LLM_CONCURRENCY`, `NEO4J_*`, `EMBEDDING_DIMENSIONS`, `MAX_*`, `ENTITY_RESOLUTION_USE_LLM`, `INGESTION_CHECKPOINT_DB_PATH`, `LOG_LEVEL`. Nunca hardcodar credenciais no código.
+Ver `.env.example` na raiz de `ingestion/` — cobre `LLM_PROVIDER`, `OLLAMA_*`, `OPENAI_*`, `LLM_CONCURRENCY`, `POSTGRES_DSN`, `EMBEDDING_DIMENSIONS`, `MAX_*`, `ENTITY_RESOLUTION_USE_LLM`, `INGESTION_CHECKPOINT_DB_PATH`, `LOG_LEVEL`. Nunca hardcodar credenciais no código.
 
 ## Camada LLM: `app/llm.py` (arquivo único, multi-provider)
 
@@ -58,7 +58,7 @@ class EmbeddingClient(Protocol):
 
 ## Concorrência: `LLM_CONCURRENCY`
 
-Dentro de cada execução de um nó de expansão (`expand_events`, `expand_people`, `expand_places`, `extract_relationships`, `generate_claims`), até `LLM_CONCURRENCY` chamadas de LLM rodam em paralelo via `asyncio.gather` (I/O-bound — concorrência assíncrona, não threads OS). A resolução de entidade e a persistência que seguem cada resultado são **sempre sequenciais**, na ordem original do lote — nunca em paralelo, porque `resolve_entity` faz um read seguido de um write não-atômico contra o Neo4j; paralelizar essa parte poderia fazer duas chamadas concorrentes criarem dois nós para a mesma entidade. `LLM_CONCURRENCY=1` (default, provider Ollama) reproduz o comportamento inteiramente sequencial; valores maiores (4-8) fazem sentido com `LLM_PROVIDER=openai`.
+Dentro de cada execução de um nó de expansão (`expand_events`, `expand_people`, `expand_places`, `extract_relationships`, `generate_claims`), até `LLM_CONCURRENCY` chamadas de LLM rodam em paralelo via `asyncio.gather` (I/O-bound — concorrência assíncrona, não threads OS). A resolução de entidade e a persistência que seguem cada resultado são **sempre sequenciais**, na ordem original do lote — nunca em paralelo, porque `resolve_entity` faz um read seguido de um write não-atômico contra o Postgres; paralelizar essa parte poderia fazer duas chamadas concorrentes criarem duas linhas para a mesma entidade. `LLM_CONCURRENCY=1` (default, provider Ollama) reproduz o comportamento inteiramente sequencial; valores maiores (4-8) fazem sentido com `LLM_PROVIDER=openai`.
 
 ## Checkpoint e resume
 
@@ -74,4 +74,8 @@ Cada nó de loop envolve o processamento de 1 item em `try/except`. Uma exceçã
 
 ## Idempotência
 
-Toda escrita no Neo4j usa `MERGE` sobre o `id` estável (nunca o nome cru). Para relacionamentos, o `id` **precisa estar dentro do próprio padrão do `MERGE`** (`MERGE (s)-[r:TYPE {id:$id}]->(t)`), nunca aplicado via `SET` depois de um `MERGE` sem propriedades — esse é o erro clássico de Cypher que passaria despercebido em testes ingênuos e duplicaria arestas em produção.
+Toda escrita no Postgres usa `INSERT ... ON CONFLICT (id) DO UPDATE SET ...` sobre o `id` estável (nunca o nome cru) — o equivalente direto do `MERGE` por id do Neo4j. Como o `id` de um relacionamento já é derivado do triplo `(source_id, relationship_type, target_id)` (`stable_relationship_id`), conflito por `id` sozinho já garante que o mesmo relacionamento lógico nunca duplica.
+
+## Travessia de grafo: `WITH RECURSIVE`
+
+Sem adjacência nativa de grafo, travessias multi-hop (ex. "como a Assíria se conecta com a Grécia") usam `WITH RECURSIVE` sobre a tabela `relationships` — ver `RelationshipRepository.find_connected` e `spec/04-postgres-schema-spec.md`. Deliberadamente não otimizado (re-percorre a tabela a cada passo da recursão) por decisão explícita do projeto — o volume de arestas em V1 não justifica tuning de query plan. Não está conectado ao pipeline de ingestão ainda; é o bloco de construção para a futura camada de consulta (`spec/01`).

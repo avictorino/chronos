@@ -29,9 +29,12 @@ def test_historical_date_valid_range():
     assert date.earliest_year <= date.latest_year
 
 
-def test_historical_date_invalid_range_rejected():
-    with pytest.raises(ValidationError):
-        HistoricalDate(earliest_year=-320, latest_year=-350, precision=DatePrecision.RANGE)
+def test_historical_date_reversed_range_is_swapped_not_rejected():
+    """LLMs reliably get earliest/latest backwards for BCE ranges — self-heal
+    by swapping instead of rejecting the whole item over an ordering slip."""
+    date = HistoricalDate(earliest_year=-320, latest_year=-350, precision=DatePrecision.RANGE)
+    assert date.earliest_year == -350
+    assert date.latest_year == -320
 
 
 # --- AnyEntity discriminated union -------------------------------------------

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from app.domain.models import IngestionError, KnowledgeChunk
 from app.graph.state import GraphDeps
-from app.persistence.vector import ensure_vector_index, get_or_detect_dimension
+from app.persistence.vector import ensure_vector_ready, get_or_detect_dimension
 from app.utils.logging import get_logger
 
 log = get_logger("embedding")
@@ -15,7 +15,7 @@ log = get_logger("embedding")
 async def ensure_index_ready(deps: GraphDeps) -> int:
     dimension = await get_or_detect_dimension(deps.settings, deps.embedding_client)
     if not deps.dry_run and deps.conn is not None:
-        await ensure_vector_index(deps.conn, dimension)
+        await ensure_vector_ready(deps.conn, dimension)
     return dimension
 
 

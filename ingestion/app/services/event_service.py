@@ -27,11 +27,19 @@ async def resolve_and_persist_event(result: EventExpansion, deps: GraphDeps) -> 
         deps.embedding_client,
         deps.llm_client,
         deps.settings.entity_resolution_use_llm,
+        require_embedding_confirmation=True,
     )
     event_id = stable_event_id(result.event_type, result.name)
     if resolution.action == "merge" and resolution.existing_entity_id:
         event_id = resolution.existing_entity_id
-        log.info("ENTITY", "Existing event found", name=result.name)
+        log.info(
+            "ENTITY",
+            "Existing event found",
+            candidate=result.name,
+            existing_id=resolution.existing_entity_id,
+            confidence=round(resolution.confidence, 2),
+            reason=resolution.reason,
+        )
 
     event = HistoricalEvent(
         id=event_id,

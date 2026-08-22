@@ -106,6 +106,17 @@ def _error(node: str, item: str, exc: BaseException) -> dict:
     return IngestionError(node=node, item=item, message=str(exc)).model_dump(mode="json")
 
 
+def _log_resolution_merge(candidate_name: str, resolution) -> None:  # noqa: ANN001 - EntityResolutionResult
+    log.info(
+        "ENTITY",
+        "Existing entity found",
+        candidate=candidate_name,
+        existing_id=resolution.existing_entity_id,
+        confidence=round(resolution.confidence, 2),
+        reason=resolution.reason,
+    )
+
+
 # --- linear nodes --------------------------------------------------------------
 
 
@@ -140,7 +151,7 @@ async def persist_civilization(state: IngestionState, config: RunnableConfig) ->
     )
     if not deps.dry_run:
         await deps.entity_repo.upsert(civilization)
-        log.info("NEO4J", "Civilization persisted", name=civilization.canonical_name)
+        log.info("POSTGRES", "Civilization persisted", name=civilization.canonical_name)
     else:
         log.info("LLM", "Civilization profile extracted (dry-run, not persisted)", name=civilization.canonical_name)
 
@@ -291,7 +302,7 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
             person_id = stable_entity_id(EntityType.PERSON, result.canonical_name)
             if resolution.action == "merge" and resolution.existing_entity_id:
                 person_id = resolution.existing_entity_id
-                log.info("ENTITY", "Existing entity found", name=result.canonical_name)
+                _log_resolution_merge(result.canonical_name, resolution)
             person = Person(
                 id=person_id,
                 canonical_name=result.canonical_name,
@@ -373,7 +384,7 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
             place_id = stable_entity_id(result.place_kind, result.canonical_name)
             if resolution.action == "merge" and resolution.existing_entity_id:
                 place_id = resolution.existing_entity_id
-                log.info("ENTITY", "Existing entity found", name=result.canonical_name)
+                _log_resolution_merge(result.canonical_name, resolution)
             place = Place(
                 id=place_id,
                 entity_type=result.place_kind,
@@ -431,7 +442,7 @@ _NAME_RESOLUTION_TYPES = [
 async def _resolve_name_to_id(name: str, state: IngestionState, deps: GraphDeps) -> str | None:
     """Resolves a bare name (as mentioned in a relationship/claim) to an
     already-known entity/event id. Checks this run's in-memory state first
-    (cheap), then falls back to Neo4j across the likely entity types plus
+    (cheap), then falls back to Postgres across the likely entity types plus
     events. Returns None if nothing sufficiently similar is found — the
     caller queues the name for the final `entity_resolution` stub sweep."""
     needle = name.strip().lower()
@@ -451,13 +462,15 @@ async def _resolve_name_to_id(name: str, state: IngestionState, deps: GraphDeps)
         candidates = await deps.entity_repo.find_candidates(entity_type)
         if not candidates:
             continue
-        resolution = await resolve_entity(name, [], candidates)
+        resolution = await resolve_entity(name, [], candidates, deps.embedding_client, deps.llm_client)
         if resolution.action == "merge" and resolution.existing_entity_id:
             return resolution.existing_entity_id
 
     event_candidates = await deps.event_repo.find_candidates()
     if event_candidates:
-        resolution = await resolve_entity(name, [], event_candidates)
+        resolution = await resolve_entity(
+            name, [], event_candidates, deps.embedding_client, deps.llm_client, require_embedding_confirmation=True
+        )
         if resolution.action == "merge" and resolution.existing_entity_id:
             return resolution.existing_entity_id
 
@@ -727,7 +740,7 @@ async def generate_embeddings(state: IngestionState, config: RunnableConfig) -> 
 async def persist_graph(state: IngestionState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     if deps.dry_run:
-        log.info("INGESTION", "Dry-run complete — nothing was written to Neo4j")
+        log.info("INGESTION", "Dry-run complete — nothing was written to Postgres")
         return {}
 
     run = IngestionRun(

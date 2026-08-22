@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,15 +25,19 @@ class Settings(BaseSettings):
     # iteration (asyncio.gather, not OS threads — see spec/03-architecture-spec.md).
     llm_concurrency: int = 1
 
-    # --- Neo4j ---
-    neo4j_uri: str = "bolt://localhost:7687"
-    neo4j_username: str = "neo4j"
-    neo4j_password: str = "password"
-    neo4j_database: str = "neo4j"
+    # --- Postgres + pgvector ---
+    postgres_dsn: str = "postgresql://postgres:postgres@localhost:5432/chronos"
 
     # Vector index dimension override. None => auto-detect from the embedding
     # model at first use (see app/persistence/vector.py).
     embedding_dimensions: int | None = None
+
+    @field_validator("embedding_dimensions", mode="before")
+    @classmethod
+    def _blank_env_var_means_none(cls, value: object) -> object:
+        # An unset .env value (EMBEDDING_DIMENSIONS=) arrives as "", which
+        # int-parsing would reject — treat it the same as leaving it unset.
+        return None if value == "" else value
 
     # --- Ingestion limits (kept small by default so a run is cheap to test) ---
     max_events_per_civilization: int = 10

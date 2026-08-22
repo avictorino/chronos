@@ -278,31 +278,84 @@ async def test_item_error_does_not_abort_run(sample_civilization_seed):
     assert final_state["errors"][0]["item"] == "Event Two"
 
 
+def _require_postgres_dsn() -> None:
+    if not os.environ.get("POSTGRES_DSN"):
+        pytest.skip("POSTGRES_DSN not set — skipping integration test")
+
+
 @pytest.mark.integration
 async def test_entity_upsert_is_idempotent():
-    """Requires a real Neo4j (NEO4J_URI) — inserting the same entity twice
-    must not create a second node. Skipped automatically otherwise."""
-    if not os.environ.get("NEO4J_URI"):
-        pytest.skip("NEO4J_URI not set — skipping integration test")
+    """Requires a real Postgres (POSTGRES_DSN) — inserting the same entity
+    twice must not create a second row. Skipped automatically otherwise."""
+    _require_postgres_dsn()
 
     from app.domain.models import Person
-    from app.persistence.neo4j import Neo4jConnection
+    from app.persistence.postgres import PostgresConnection
     from app.persistence.repositories import EntityRepository
-    from app.persistence.schema import ensure_constraints
+    from app.persistence.schema import ensure_schema
     from app.utils.ids import stable_entity_id
 
     settings = Settings()
-    conn = Neo4jConnection(settings)
+    conn = PostgresConnection(settings)
     await conn.verify_connectivity()
-    await ensure_constraints(conn)
+    await ensure_schema(conn)
     repo = EntityRepository(conn)
 
     person = Person(id=stable_entity_id(EntityType.PERSON, "Test Idempotency Person"), canonical_name="Test Idempotency Person")
     try:
         await repo.upsert(person)
         await repo.upsert(person)
-        records = await conn.read("MATCH (n:Person {id: $id}) RETURN count(n) AS c", id=person.id)
-        assert records[0]["c"] == 1
+        row = await conn.fetchrow("SELECT count(*) AS c FROM entities WHERE id = $1", person.id)
+        assert row["c"] == 1
     finally:
-        await conn.write("MATCH (n:Person {id: $id}) DETACH DELETE n", id=person.id)
+        await conn.execute("DELETE FROM entities WHERE id = $1", person.id)
+        await conn.close()
+
+
+@pytest.mark.integration
+async def test_relationship_traversal_with_recursive_cte():
+    """Requires a real Postgres (POSTGRES_DSN). Builds a tiny chain
+    A-[:ALLY_OF]->B-[:ALLY_OF]->C and confirms RelationshipRepository's
+    WITH RECURSIVE traversal finds C from A within 2 hops but not within 1."""
+    _require_postgres_dsn()
+
+    from app.domain.enums import RelationshipType
+    from app.domain.models import HistoricalRelationship
+    from app.persistence.postgres import PostgresConnection
+    from app.persistence.repositories import RelationshipRepository
+    from app.persistence.schema import ensure_schema
+    from app.utils.ids import stable_relationship_id
+
+    settings = Settings()
+    conn = PostgresConnection(settings)
+    await conn.verify_connectivity()
+    await ensure_schema(conn)
+    repo = RelationshipRepository(conn)
+
+    a, b, c = "test_traverse_a", "test_traverse_b", "test_traverse_c"
+    rel_ab = HistoricalRelationship(
+        id=stable_relationship_id(a, "ALLY_OF", b),
+        source_entity_id=a,
+        target_entity_id=b,
+        relationship_type=RelationshipType.ALLY_OF,
+        confidence=0.9,
+    )
+    rel_bc = HistoricalRelationship(
+        id=stable_relationship_id(b, "ALLY_OF", c),
+        source_entity_id=b,
+        target_entity_id=c,
+        relationship_type=RelationshipType.ALLY_OF,
+        confidence=0.9,
+    )
+    try:
+        await repo.upsert(rel_ab)
+        await repo.upsert(rel_bc)
+
+        one_hop = await repo.find_connected(a, max_hops=1)
+        two_hops = await repo.find_connected(a, max_hops=2)
+
+        assert {row["id"] for row in one_hop} == {b}
+        assert {row["id"] for row in two_hops} == {b, c}
+    finally:
+        await conn.execute("DELETE FROM relationships WHERE id = ANY($1)", [rel_ab.id, rel_bc.id])
         await conn.close()

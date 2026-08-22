@@ -3,7 +3,7 @@ embedding similarity -> optional LLM tiebreaker. See spec/02-domain-model-spec.m
 
 Deliberately simple: not implementing anything more elaborate than this for V1.
 `resolve_entity` always compares against candidates already fetched from
-Neo4j (via EntityRepository/EventRepository.find_candidates) — resolving only
+Postgres (via EntityRepository/EventRepository.find_candidates) — resolving only
 against the current run's in-memory state would silently break cross-
 civilization dedup (e.g. Judah/Babylon mentioned by Assyria in a later run).
 """
@@ -59,29 +59,52 @@ async def resolve_entity(
     embedding_client: EmbeddingClient | None = None,
     llm_client: LLMClient | None = None,
     use_llm_tiebreaker: bool = False,
+    require_embedding_confirmation: bool = False,
 ) -> EntityResolutionResult:
+    """`require_embedding_confirmation=True` (used for events, see
+    event_service.py) skips the instant fuzzy-score merge (step 4) entirely —
+    real bug found in manual validation: `rapidfuzz.fuzz.WRatio` reliably
+    scores >=0.90 between *different* event names/aliases that just share a
+    lot of vocabulary ("Conquest of Sumerian City-States" vs "Conquest by
+    Sargon of Akkad" vs "Fall to Gutian Invasion" all collapsed into one row).
+    Event titles are full descriptive phrases, not proper names, so lexical
+    overlap is a much weaker same-thing signal than it is for people/places —
+    any fuzzy hit still needs embedding-level (semantic) confirmation."""
     candidate_pool = _name_pool(candidate_name, candidate_aliases)
+    candidate_canonical = candidate_pool[0] if candidate_pool else ""
 
     # 1-3: canonicalization + exact match (over name AND every alias, both sides)
     best_score = 0.0
     best_match: dict | None = None
     for entity in existing:
         existing_pool = _name_pool(entity["canonical_name"], entity.get("aliases") or [])
+        existing_canonical = existing_pool[0] if existing_pool else ""
         for c in candidate_pool:
             for e in existing_pool:
                 if c and c == e:
-                    return EntityResolutionResult(
-                        action="merge",
-                        existing_entity_id=entity["id"],
-                        confidence=1.0,
-                        reason=f"exact match on canonicalized name '{c}'",
-                    )
-                score = fuzz.WRatio(c, e) / 100
+                    if c == candidate_canonical or e == existing_canonical:
+                        # At least one side of the match is that side's own
+                        # canonical name, not merely one of its aliases —
+                        # trustworthy enough to merge immediately.
+                        return EntityResolutionResult(
+                            action="merge",
+                            existing_entity_id=entity["id"],
+                            confidence=1.0,
+                            reason=f"exact match on canonicalized name '{c}'",
+                        )
+                    # Alias-to-alias-only exact match: LLM-generated aliases
+                    # (especially for events) can coincidentally overlap
+                    # between genuinely different things — treat as a strong
+                    # signal that still needs embedding verification, not an
+                    # automatic merge (see spec/06, "false event merge").
+                    score = max(0.80, fuzz.WRatio(c, e) / 100)
+                else:
+                    score = fuzz.WRatio(c, e) / 100
                 if score > best_score:
                     best_score, best_match = score, entity
 
-    # 4: fuzzy match
-    if best_match is not None and best_score >= _FUZZY_MERGE_THRESHOLD:
+    # 4: fuzzy match (skipped for events — see require_embedding_confirmation above)
+    if not require_embedding_confirmation and best_match is not None and best_score >= _FUZZY_MERGE_THRESHOLD:
         return EntityResolutionResult(
             action="merge",
             existing_entity_id=best_match["id"],

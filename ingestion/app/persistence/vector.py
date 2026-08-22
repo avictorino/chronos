@@ -1,15 +1,20 @@
-"""Vector index over :Chunk.embedding. See spec/04-neo4j-schema-spec.md."""
+"""Sizes and indexes chunks.embedding. See spec/04-postgres-schema-spec.md.
+
+Unlike Neo4j's vector index (created with an explicit dimension up front),
+pgvector lets a column be declared as plain `vector` (no fixed length) — we
+ALTER it to a fixed `vector(n)` once we know the embedding dimension, then add
+an ANN index. Until that ALTER runs, similarity queries still work fine via a
+full sequential scan; no premature optimization needed at V1 scale.
+"""
 
 from __future__ import annotations
 
 from app.config import Settings
 from app.llm import EmbeddingClient
-from app.persistence.neo4j import Neo4jConnection
+from app.persistence.postgres import PostgresConnection
 from app.utils.logging import get_logger
 
-log = get_logger("neo4j")
-
-VECTOR_INDEX_NAME = "chunk_embedding_idx"
+log = get_logger("postgres")
 
 _dimension_cache: int | None = None
 
@@ -27,28 +32,27 @@ async def get_or_detect_dimension(settings: Settings, embedding_client: Embeddin
     return _dimension_cache
 
 
-async def ensure_vector_index(conn: Neo4jConnection, dimension: int) -> None:
-    existing = await conn.read(
-        "SHOW VECTOR INDEXES YIELD name, options WHERE name = $name RETURN options",
-        name=VECTOR_INDEX_NAME,
+async def ensure_vector_ready(conn: PostgresConnection, dimension: int) -> None:
+    row = await conn.fetchrow(
+        "SELECT format_type(atttypid, atttypmod) AS type "
+        "FROM pg_attribute WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"
     )
-    if existing:
-        options = existing[0]["options"]
-        existing_dim = (options or {}).get("indexConfig", {}).get("vector.dimensions")
-        if existing_dim is not None and int(existing_dim) != dimension:
+    current_type = row["type"] if row else None  # "vector(768)" once sized, "vector" until then
+
+    if current_type and current_type != "vector":
+        current_dim = int(current_type.removeprefix("vector(").removesuffix(")"))
+        if current_dim != dimension:
             raise RuntimeError(
-                f"Vector index '{VECTOR_INDEX_NAME}' already exists with dimension "
-                f"{existing_dim}, but the current embedding model produces "
-                f"{dimension}-dim vectors. Changing OLLAMA_EMBEDDING_MODEL/"
-                "OPENAI_EMBEDDING_MODEL after data was already ingested requires a "
-                "manual migration (drop the index, re-embed, recreate) — see "
-                "spec/06-acceptance-tests-spec.md."
+                f"chunks.embedding is already vector({current_dim}), but the current "
+                f"embedding model produces {dimension}-dim vectors. Changing "
+                "OLLAMA_EMBEDDING_MODEL/OPENAI_EMBEDDING_MODEL after data was already "
+                "ingested requires a manual migration (ALTER the column, re-embed) — "
+                "see spec/06-acceptance-tests-spec.md."
             )
         return
-    await conn.write(
-        f"CREATE VECTOR INDEX {VECTOR_INDEX_NAME} IF NOT EXISTS "
-        "FOR (c:Chunk) ON (c.embedding) "
-        "OPTIONS {indexConfig: {`vector.dimensions`: $dim, `vector.similarity_function`: 'cosine'}}",
-        dim=dimension,
+
+    await conn.execute(f"ALTER TABLE chunks ALTER COLUMN embedding TYPE vector({dimension})")
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw_idx ON chunks USING hnsw (embedding vector_cosine_ops)"
     )
-    log.info("NEO4J", "Vector index created", name=VECTOR_INDEX_NAME, dimension=dimension)
+    log.info("POSTGRES", "chunks.embedding sized and indexed", dimension=dimension)

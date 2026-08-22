@@ -2,7 +2,7 @@
 
 `IngestionState` only carries mutable working data (see spec/03). Run
 parameters (limits, dry_run, model name) and heavyweight/non-serializable
-collaborators (LLM client, repositories, Neo4j connection) live in
+collaborators (LLM client, repositories, Postgres connection) live in
 `GraphDeps`, threaded through `config["configurable"]["deps"]` — never inside
 the checkpointed state itself.
 
@@ -18,7 +18,7 @@ from typing import TypedDict
 
 from app.config import Settings
 from app.llm import EmbeddingClient, LLMClient
-from app.persistence.neo4j import Neo4jConnection
+from app.persistence.postgres import PostgresConnection
 from app.persistence.repositories import (
     ChunkRepository,
     ClaimRepository,
@@ -40,7 +40,7 @@ class GraphDeps:
     claim_repo: ClaimRepository
     chunk_repo: ChunkRepository
     run_repo: IngestionRunRepository
-    conn: Neo4jConnection | None
+    conn: PostgresConnection | None
     run_id: str
     model_name: str
     dry_run: bool

@@ -1,5 +1,5 @@
 """Shared test doubles — no test in this suite requires a real Ollama/OpenAI
-or Neo4j instance (see spec/06-acceptance-tests-spec.md)."""
+or Postgres instance (see spec/06-acceptance-tests-spec.md)."""
 
 from __future__ import annotations
 

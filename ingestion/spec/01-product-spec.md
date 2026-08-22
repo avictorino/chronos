@@ -2,19 +2,19 @@
 
 ## Visão
 
-Chronos `ingestion` transforma o conhecimento paramétrico de um LLM (local via Ollama, ou hospedado via OpenAI) em um grafo de conhecimento histórico estruturado, auditável e navegável, persistido no Neo4j. É o primeiro módulo de uma plataforma maior que pretende funcionar como "Google Maps + Wikipedia + Knowledge Graph da História".
+Chronos `ingestion` transforma o conhecimento paramétrico de um LLM (local via Ollama, ou hospedado via OpenAI) em um grafo de conhecimento histórico estruturado, auditável e navegável, persistido em Postgres + pgvector (travessia via `WITH RECURSIVE`, busca semântica via `pgvector`). É o primeiro módulo de uma plataforma maior que pretende funcionar como "Google Maps + Wikipedia + Knowledge Graph da História".
 
 ## Escopo desta etapa
 
 **Implementado:**
 - Pipeline determinístico (LangGraph) que parte de uma lista seed de civilizações e produz: perfil da civilização, eventos, pessoas, lugares, polities, relações, claims e chunks semânticos com embeddings.
 - Deduplicação/entity resolution simples, cross-civilização.
-- Persistência incremental e idempotente no Neo4j (grafo + vector index).
+- Persistência incremental e idempotente em Postgres (tabelas normalizadas + coluna `pgvector`).
 - CLI para rodar uma civilização, todas, com `--dry-run`, ou retomar (`--resume`) um run interrompido.
 
 **Explicitamente fora de escopo agora** (mas o modelo de dados já é compatível com essas extensões futuras):
 - Frontend/visualização (`../frontend`, placeholder).
-- Chatbot ou qualquer resposta em linguagem natural (GraphRAG de consulta: `VectorRetriever`, `VectorCypherRetriever`, `Text2Cypher`).
+- Chatbot ou qualquer resposta em linguagem natural (GraphRAG de consulta: busca `pgvector` combinada com travessia `WITH RECURSIVE`/Text2SQL).
 - Pipeline de ingestão de **fontes primárias** (Bíblia, ORACC, Perseus, inscrições, artigos acadêmicos) que produziria `SourceClaim`s capazes de confirmar ou contestar os `HistoricalClaim`s gerados por LLM.
 
 ## Glossário

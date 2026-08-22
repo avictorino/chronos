@@ -75,3 +75,32 @@ async def test_nebuchadnezzar_transliteration_known_limitation():
     ]
     result = await resolve_entity("Nabucodonosor II", [], existing_with_alias)
     assert result.action == "merge"
+
+
+# --- require_embedding_confirmation (events) ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_event_fuzzy_false_positive_without_embedding_confirmation():
+    """Real bug found in manual validation (spec/06): rapidfuzz.fuzz.WRatio
+    reliably scores >=0.90 between event titles that are just token-reordered
+    variants of each other, even when they describe genuinely different
+    events (e.g. the *rise* of an empire vs its *fall*). Without
+    `require_embedding_confirmation`, that alone triggers an instant merge —
+    this documents the failure mode that flag exists to close."""
+    existing = [{"id": "event_fall", "canonical_name": "Fall of the Akkadian Empire", "aliases": []}]
+    result = await resolve_entity("The Akkadian Empire Fall", [], existing)
+    assert result.action == "merge"  # the bug, reproduced
+
+
+@pytest.mark.asyncio
+async def test_event_resolution_requires_embedding_confirmation():
+    """Same token-reordered pair as above, but with require_embedding_confirmation
+    (what event_service.py actually uses) — no embedding client available means
+    no semantic second opinion, so it correctly refuses to auto-merge instead
+    of trusting the inflated fuzzy score."""
+    existing = [{"id": "event_fall", "canonical_name": "Fall of the Akkadian Empire", "aliases": []}]
+    result = await resolve_entity(
+        "The Akkadian Empire Fall", [], existing, require_embedding_confirmation=True
+    )
+    assert result.action == "create"

@@ -169,4 +169,4 @@ def stable_claim_id(subject_id: str | None, predicate: str, object_id: str | Non
 
 `stable_claim_id` inclui o **texto completo** da `statement`, não só o triplo — evita colapsar afirmações textualmente distintas (e potencialmente conflitantes/disputadas) sobre o mesmo par de entidades. Trade-off aceito: reruns em que o LLM formula a frase de forma ligeiramente diferente podem acumular quase-duplicatas (ver `06-acceptance-tests-spec.md`, limitações conhecidas).
 
-IDs estáveis (determinísticos) são o que viabiliza `MERGE` idempotente no Neo4j: rodar a mesma ingestão duas vezes converge para o mesmo `id`, nunca cria um nó novo.
+IDs estáveis (determinísticos) são o que viabiliza `INSERT ... ON CONFLICT (id) DO UPDATE` idempotente no Postgres: rodar a mesma ingestão duas vezes converge para o mesmo `id`, nunca cria uma linha nova.

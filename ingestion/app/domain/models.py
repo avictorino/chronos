@@ -31,10 +31,15 @@ class HistoricalDate(BaseModel):
     confidence: float | None = None
 
     @model_validator(mode="after")
-    def _check_range(self) -> "HistoricalDate":
+    def _normalize_range(self) -> "HistoricalDate":
+        # Self-healing, not rejecting: LLMs reliably get earliest/latest
+        # backwards for BCE ranges (more negative = earlier is unintuitive),
+        # and self-correction retry doesn't fix it reliably either — swapping
+        # preserves the intended range instead of burning a retry / erroring
+        # the whole item out over an ordering slip.
         if self.earliest_year is not None and self.latest_year is not None:
             if self.earliest_year > self.latest_year:
-                raise ValueError("earliest_year must be <= latest_year")
+                self.earliest_year, self.latest_year = self.latest_year, self.earliest_year
         return self
 
 
@@ -132,27 +137,6 @@ _ENTITY_TYPE_TO_TAG: dict[EntityType, str] = {
     EntityType.CULTURE: "concept",
     EntityType.LANGUAGE: "concept",
     EntityType.CONCEPT: "concept",
-}
-
-# Neo4j label for each entity_type — used by persistence/schema.py & repositories.py.
-ENTITY_LABELS: dict[EntityType, str] = {
-    EntityType.CIVILIZATION: "Civilization",
-    EntityType.PERSON: "Person",
-    EntityType.PLACE: "Place",
-    EntityType.CITY: "Place",
-    EntityType.REGION: "Place",
-    EntityType.POLITY: "Polity",
-    EntityType.EMPIRE: "Polity",
-    EntityType.KINGDOM: "Polity",
-    EntityType.DYNASTY: "Polity",
-    EntityType.DOCUMENT: "Document",
-    EntityType.TEXT: "Document",
-    EntityType.INSCRIPTION: "Document",
-    EntityType.RELIGION: "Concept",
-    EntityType.DEITY: "Concept",
-    EntityType.CULTURE: "Concept",
-    EntityType.LANGUAGE: "Concept",
-    EntityType.CONCEPT: "Concept",
 }
 
 
