@@ -1,39 +1,99 @@
 # Chronos
 
-Chronos é uma plataforma para explorar milhares de anos de história mundial como um grafo de conhecimento navegável — civilizações, impérios, reinos, pessoas, eventos, lugares, religiões, documentos e as relações (causais, temporais, geográficas) entre eles. A visão de longo prazo é algo como **"Google Maps + Wikipedia + Knowledge Graph da História"**.
+Chronos is a platform for exploring thousands of years of world history as a navigable knowledge graph — civilizations, empires, kingdoms, people, events, places, religions, documents, and the relationships (causal, temporal, geographic) between them. The long-term vision is something like **"Google Maps + Wikipedia + a Knowledge Graph of History."**
 
-Este é um monorepo com dois projetos independentes:
+This is a monorepo with two independent projects:
 
-| Projeto | Status | O que é |
+| Project | Status | What it is |
 |---|---|---|
-| [`ingestion/`](ingestion/README.md) | ✅ implementado | Pipeline Python que usa um LLM local (ou OpenAI) via LangGraph para gerar, validar, deduplicar e persistir conhecimento histórico em Postgres + pgvector. |
-| [`frontend/`](frontend/README.md) | 🚧 planejado, não implementado | App Firebase para navegar/visualizar o grafo de conhecimento. |
+| [`ingestion/`](ingestion/README.md) | ✅ implemented | Python pipeline that uses a local LLM (or OpenAI) via LangGraph to generate, validate, deduplicate, and persist historical knowledge into Postgres + pgvector. |
+| [`frontend/`](frontend/README.md) | 🚧 planned, not implemented | Firebase app to browse/visualize the knowledge graph. |
 
-## Grafo modelado em Postgres, não num banco de grafo nativo
+## Vision / goal
 
-A história não é uma lista de fatos isolados — é uma rede densa de relações temporais, geográficas e causais entre entidades de tipos muito diferentes (uma pessoa pode ser governante de uma polity, participar de um evento, ser mencionada em um documento, ser adorada como uma divindade em outra cultura). Um banco de grafo nativo (Neo4j) modelaria isso mais diretamente, mas o projeto usa **Postgres + [pgvector](https://github.com/pgvector/pgvector)** — a entidade/evento vira uma linha com um blob `JSONB`, a relação vira uma linha `(source_id, relationship_type, target_id)`, e travessias multi-hop usam `WITH RECURSIVE`. Trade-off consciente: menos otimizado que adjacência nativa de grafo para travessias profundas, mas evita rodar uma segunda tecnologia de banco quando já se tem Postgres+pgvector disponível — aceitável no volume desta etapa. Ver [`ingestion/spec/04-postgres-schema-spec.md`](ingestion/spec/04-postgres-schema-spec.md) para o desenho completo.
+The target experience for the (not yet built) `frontend/`: a timeline of civilizations, a knowledge-graph panel for the selected entity (person/place/event/document relationships), a map view, and a primary-source evidence panel with confidence scores — all browsing the same graph the `ingestion/` pipeline populates.
 
-## Filosofia
+<!-- TODO: vision mockup image pending — add docs/vision-mockup.png and restore
+     ![Chronos frontend vision mockup](docs/vision-mockup.png) below once it's in the repo. -->
 
-- Simplicidade antes de abstração: um processo Python bem organizado, sem microservices/Kafka/Celery/Redis/Kubernetes.
-- Todo conhecimento gerado por LLM nasce marcado como `origin=llm_generated` / `verification_status=unverified` — nunca é tratado como fato verificado. Um pipeline futuro de ingestão de fontes primárias (textos, inscrições, artigos acadêmicos) poderá confirmar ou contestar esse conhecimento.
-- Determinístico e controlável: nada de agente autônomo solto — o pipeline de ingestão é um grafo de estados explícito (LangGraph), com limites de profundidade/quantidade, checkpoint e retomada, e idempotência via `INSERT ... ON CONFLICT`.
+*This describes a design mockup of where the product is headed, not a screenshot of working software — `frontend/` hasn't been built yet.*
 
-## Infraestrutura compartilhada
+## Data ingested so far
 
-`docker-compose.yml` nesta raiz sobe um Postgres com `pgvector` para quem não já tiver um local — usado pelo `ingestion/` hoje e, futuramente, por qualquer camada de consulta/API que sirva o `frontend/`:
+Snapshot of the local Postgres instance as of 2026-08-22 (see [`ingestion/`](ingestion/README.md) for how to reproduce/extend this):
+
+| Table | Rows |
+|---|---|
+| `entities` | 194 |
+| `events` | 17 |
+| `relationships` | 115 |
+| `claims` | 442 |
+| `chunks` | 465 |
+| `ingestion_runs` | 4 |
+
+**Civilizations fully ingested** (4 of 42 seeded in [`ingestion/data/civilizations.yaml`](ingestion/data/civilizations.yaml)):
+
+| Civilization | Entities created | Errors | Finished at (UTC) |
+|---|---|---|---|
+| Sumer | 60 | 0 | 2026-08-22 16:41 |
+| Akkadian Empire | 53 | 0 | 2026-08-22 17:02 |
+| Assyria | 57 | 0 | 2026-08-22 17:18 |
+| Babylon | 55 | 0 | 2026-08-22 17:36 |
+
+**Entities by type:**
+
+| Type | Count |
+|---|---|
+| CONCEPT | 62 |
+| CIVILIZATION | 25 |
+| REGION | 20 |
+| PERSON | 19 |
+| PLACE | 19 |
+| CITY | 10 |
+| CULTURE | 8 |
+| EMPIRE | 7 |
+| DYNASTY | 6 |
+| DEITY | 5 |
+| POLITY | 5 |
+| TEXT | 3 |
+| INSCRIPTION | 2 |
+| KINGDOM | 1 |
+| RELIGION | 1 |
+| LANGUAGE | 1 |
+
+The remaining 38 civilizations haven't been ingested yet — the `--all` run started for this batch stopped after Babylon (no errors recorded against it; it simply isn't running anymore). Resume the rest with:
+
+```bash
+cd ingestion && python -m app.main ingest --all --max-events 100 --max-people 200 --max-places 200
+```
+
+Already-ingested civilizations are cheap to re-run: persistence is idempotent (`INSERT ... ON CONFLICT`), so re-processing Sumer/Akkad/Assyria/Babylon mostly just re-upserts the same deterministic IDs rather than duplicating them.
+
+## Graph modeled in Postgres, not a native graph database
+
+History isn't a list of isolated facts — it's a dense network of temporal, geographic, and causal relationships between entities of very different kinds (a person can rule a polity, take part in an event, be mentioned in a document, be worshipped as a deity in another culture). A native graph database (Neo4j) would model this more directly, but this project uses **Postgres + [pgvector](https://github.com/pgvector/pgvector)** instead — an entity/event becomes a row with a `JSONB` blob, a relationship becomes a `(source_id, relationship_type, target_id)` row, and multi-hop traversals use `WITH RECURSIVE`. Deliberate trade-off: less optimized than native graph adjacency for deep traversals, but avoids running a second database technology when Postgres+pgvector is already available — acceptable at this stage's volume. See [`ingestion/spec/04-postgres-schema-spec.md`](ingestion/spec/04-postgres-schema-spec.md) for the full design.
+
+## Philosophy
+
+- Simplicity over abstraction: one well-organized Python process, no microservices/Kafka/Celery/Redis/Kubernetes.
+- All LLM-generated knowledge is born tagged `origin=llm_generated` / `verification_status=unverified` — never treated as verified fact. A future primary-source ingestion pipeline (texts, inscriptions, academic papers) will be able to confirm or dispute this knowledge.
+- Deterministic and controllable: no loose autonomous agent — the ingestion pipeline is an explicit state graph (LangGraph), with depth/quantity limits, checkpointing and resume, and idempotency via `INSERT ... ON CONFLICT`.
+
+## Shared infrastructure
+
+The root `docker-compose.yml` brings up a Postgres with `pgvector` for anyone who doesn't already have one locally — used by `ingestion/` today and, in the future, by whatever query/API layer serves the `frontend/`:
 
 ```bash
 docker compose up -d
 ```
 
-Se você já tem Postgres+pgvector rodando localmente, não precisa disso — só aponte `POSTGRES_DSN` (em `ingestion/.env`) para a sua instância.
+If you already have Postgres+pgvector running locally, you don't need this — just point `POSTGRES_DSN` (in `ingestion/.env`) at your instance.
 
-Veja [`ingestion/README.md`](ingestion/README.md) para instruções completas de setup e execução do pipeline de ingestão.
+See [`ingestion/README.md`](ingestion/README.md) for full setup and pipeline instructions.
 
 ## Roadmap
 
-1. ✅ `ingestion/` — gera o grafo de conhecimento a partir de uma LLM local.
-2. 🔜 Pipeline de ingestão de fontes primárias (textos históricos, inscrições, artigos) que cria `SourceClaim`s para confirmar/contestar o conhecimento gerado por LLM.
-3. 🔜 Camada de consulta (GraphRAG: busca vetorial `pgvector` + travessia `WITH RECURSIVE`) sobre o Postgres.
-4. 🔜 `frontend/` — exploração visual do grafo (Firebase).
+1. ✅ `ingestion/` — generates the knowledge graph from a local LLM.
+2. 🔜 Primary-source ingestion pipeline (historical texts, inscriptions, papers) that creates `SourceClaim`s to confirm/dispute LLM-generated knowledge.
+3. 🔜 Query layer (GraphRAG: `pgvector` similarity search + `WITH RECURSIVE` traversal) over Postgres.
+4. 🔜 `frontend/` — visual graph exploration (Firebase).
