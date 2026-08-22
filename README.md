@@ -11,12 +11,11 @@ This is a monorepo with two independent projects:
 
 ## Vision / goal
 
-The target experience for the (not yet built) `frontend/`: a timeline of civilizations, a knowledge-graph panel for the selected entity (person/place/event/document relationships), a map view, and a primary-source evidence panel with confidence scores — all browsing the same graph the `ingestion/` pipeline populates.
+The mockup below is the target experience for the (not yet built) `frontend/`: a timeline of civilizations, a knowledge-graph panel for the selected entity (person/place/event/document relationships), a map view, and a primary-source evidence panel with confidence scores — all browsing the same graph the `ingestion/` pipeline populates.
 
-<!-- TODO: vision mockup image pending — add docs/vision-mockup.png and restore
-     ![Chronos frontend vision mockup](docs/vision-mockup.png) below once it's in the repo. -->
+![Chronos frontend vision mockup](docs/vision-mockup.png)
 
-*This describes a design mockup of where the product is headed, not a screenshot of working software — `frontend/` hasn't been built yet.*
+*This is a design mockup of where the product is headed, not a screenshot of working software — `frontend/` hasn't been built yet.*
 
 ## Data ingested so far
 
