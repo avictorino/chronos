@@ -57,8 +57,10 @@ def _initial_state(seed: CivilizationSeed) -> IngestionState:
         processed_events=[],
         pending_people=[],
         processed_people=[],
+        people_discovery_done=False,
         pending_places=[],
         processed_places=[],
+        places_discovery_done=False,
         pending_relationship_subjects=[],
         pending_claim_subjects=[],
         pending_chunk_subjects=[],
@@ -127,6 +129,7 @@ async def run_ingestion(
     max_events: int | None = None,
     max_people: int | None = None,
     max_places: int | None = None,
+    max_depth: int | None = None,
 ) -> IngestionState:
     settings = settings or get_settings()
     if max_events is not None:
@@ -135,6 +138,8 @@ async def run_ingestion(
         settings.max_people_per_civilization = max_people
     if max_places is not None:
         settings.max_places_per_civilization = max_places
+    if max_depth is not None:
+        settings.max_expansion_depth = max_depth
 
     seed = get_civilization(civilization_id)
     run_id = resume_run_id or new_run_id()

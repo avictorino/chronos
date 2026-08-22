@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     llm_provider: str = "ollama"  # "ollama" | "openai"
 
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3.5:9b"
+    ollama_model: str = "gemma4:12b"
     ollama_embedding_model: str = "embeddinggemma"
 
     openai_api_key: str | None = None
@@ -39,12 +39,18 @@ class Settings(BaseSettings):
         # int-parsing would reject — treat it the same as leaving it unset.
         return None if value == "" else value
 
-    # --- Ingestion limits (kept small by default so a run is cheap to test) ---
-    max_events_per_civilization: int = 10
-    max_people_per_civilization: int = 20
-    max_places_per_civilization: int = 20
+    # --- Ingestion limits ---
+    # Per-civilization budgets, counted across *both* the initial discovery
+    # batch and everything recursively queued afterwards (see
+    # graph/nodes.py::_enqueue_mentions) — not just the first LLM call's output.
+    max_events_per_civilization: int = 100
+    max_people_per_civilization: int = 200
+    max_places_per_civilization: int = 200
     max_relationships_per_entity: int = 30
-    max_expansion_depth: int = 2
+    # Hop count from the civilization root: an event/person/place discovered by
+    # expanding something at depth d can recursively queue new candidates at
+    # depth d+1, up to this cap (see graph/nodes.py::_route_after_stage).
+    max_expansion_depth: int = 3
 
     # --- Entity resolution ---
     entity_resolution_use_llm: bool = False

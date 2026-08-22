@@ -1,7 +1,7 @@
 """Assembles the StateGraph. See spec/03-architecture-spec.md for the node
-diagram. `MAX_EXPANSION_DEPTH`/counting-based limits are enforced upstream
-(discover_* nodes already cap candidate lists to MAX_*_PER_CIVILIZATION), so
-this module only wires nodes together.
+diagram. `max_expansion_depth`/`max_*_per_civilization` limits are enforced in
+graph/nodes.py (`_enqueue_mentions`/`_route_after_stage`), so this module only
+wires nodes together.
 """
 
 from __future__ import annotations
@@ -41,12 +41,15 @@ def build_workflow(checkpointer=None):
     graph.add_edge("extract_civilization_profile", "persist_civilization")
     graph.add_edge("persist_civilization", "discover_events")
     graph.add_edge("discover_events", "expand_events")
-    # expand_events / expand_people / expand_places / extract_relationships /
-    # generate_claims route themselves dynamically via Command(goto=...)
-    # (self-loop while pending items remain, otherwise on to the next stage)
-    # — they intentionally have no static outgoing add_edge.
-    graph.add_edge("discover_people", "expand_people")
-    graph.add_edge("discover_places", "expand_places")
+    # discover_people / discover_places / expand_events / expand_people /
+    # expand_places / extract_relationships / generate_claims all route
+    # themselves dynamically via Command(goto=...) — expand_*/extract_*/
+    # generate_claims self-loop while their own pending list has items;
+    # discover_people/discover_places and the "queue drained" branch of every
+    # expand_* node instead call `_route_after_stage`, which is what lets a
+    # person/place discovered mid-pipeline recursively re-queue new events —
+    # looping back across stage boundaries, not just within one node. None of
+    # them have a static outgoing add_edge.
     graph.add_edge("entity_resolution", "generate_chunks")
     graph.add_edge("generate_chunks", "generate_embeddings")
     graph.add_edge("generate_embeddings", "persist_graph")

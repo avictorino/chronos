@@ -3,8 +3,13 @@
 # These dates are approximate seeds only, not historical authority — the LLM
 # may return more refined/disputed ranges when it extracts the CivilizationProfile.
 # Years are astronomical/BCE-negative: 701 BCE = -701, 70 CE = 70.
+#
+# Deliberately spans every inhabited continent and a wide range of eras, not
+# just the Mediterranean/Near East — see spec/01-product-spec.md ("history of
+# humanity", not "history of one region").
 
 civilizations:
+  # --- Mesopotamia / Near East ---
   - id: sumer
     name: Sumer
     approximate_start_year: -4500
@@ -14,11 +19,6 @@ civilizations:
     name: Akkadian Empire
     approximate_start_year: -2334
     approximate_end_year: -2154
-
-  - id: ancient_egypt
-    name: Ancient Egypt
-    approximate_start_year: -3100
-    approximate_end_year: -30
 
   - id: assyria
     name: Assyria
@@ -30,12 +30,198 @@ civilizations:
     approximate_start_year: -1894
     approximate_end_year: -539
 
+  - id: elam
+    name: Elam
+    approximate_start_year: -2700
+    approximate_end_year: -539
+
+  - id: hittite_empire
+    name: Hittite Empire
+    approximate_start_year: -1650
+    approximate_end_year: -1178
+
+  - id: phoenicia
+    name: Phoenicia
+    approximate_start_year: -1500
+    approximate_end_year: -300
+
+  - id: ancient_israel
+    name: Ancient Israel and Judah
+    approximate_start_year: -1200
+    approximate_end_year: -586
+
+  - id: achaemenid_persia
+    name: Achaemenid Persia
+    approximate_start_year: -550
+    approximate_end_year: -330
+
+  - id: sassanid_persia
+    name: Sassanid Persia
+    approximate_start_year: 224
+    approximate_end_year: 651
+
+  # --- Egypt / Africa ---
+  - id: ancient_egypt
+    name: Ancient Egypt
+    approximate_start_year: -3100
+    approximate_end_year: -30
+
+  - id: kingdom_of_kush
+    name: Kingdom of Kush
+    approximate_start_year: -1070
+    approximate_end_year: 350
+
+  - id: axumite_empire
+    name: Axumite Empire
+    approximate_start_year: 100
+    approximate_end_year: 940
+
+  - id: ghana_empire
+    name: Ghana Empire
+    approximate_start_year: 300
+    approximate_end_year: 1200
+
+  - id: mali_empire
+    name: Mali Empire
+    approximate_start_year: 1226
+    approximate_end_year: 1670
+
+  - id: great_zimbabwe
+    name: Kingdom of Zimbabwe
+    approximate_start_year: 1220
+    approximate_end_year: 1450
+
+  # --- Mediterranean / Europe ---
+  - id: minoan_civilization
+    name: Minoan Civilization
+    approximate_start_year: -2700
+    approximate_end_year: -1100
+
+  - id: mycenaean_greece
+    name: Mycenaean Greece
+    approximate_start_year: -1600
+    approximate_end_year: -1100
+
   - id: ancient_greece
     name: Ancient Greece
     approximate_start_year: -1600
+    approximate_end_year: -146
+
+  - id: carthage
+    name: Carthage
+    approximate_start_year: -814
     approximate_end_year: -146
 
   - id: roman_civilization
     name: Ancient Rome
     approximate_start_year: -753
     approximate_end_year: 476
+
+  - id: byzantine_empire
+    name: Byzantine Empire
+    approximate_start_year: 330
+    approximate_end_year: 1453
+
+  - id: celtic_iron_age_europe
+    name: Iron Age Celtic Europe
+    approximate_start_year: -800
+    approximate_end_year: 100
+
+  - id: norse_viking_age
+    name: Viking Age Scandinavia
+    approximate_start_year: 793
+    approximate_end_year: 1066
+
+  # --- South / East / Central Asia ---
+  - id: indus_valley_civilization
+    name: Indus Valley Civilization
+    approximate_start_year: -3300
+    approximate_end_year: -1300
+
+  - id: maurya_empire
+    name: Maurya Empire
+    approximate_start_year: -322
+    approximate_end_year: -185
+
+  - id: gupta_empire
+    name: Gupta Empire
+    approximate_start_year: 320
+    approximate_end_year: 550
+
+  - id: shang_dynasty
+    name: Shang Dynasty
+    approximate_start_year: -1600
+    approximate_end_year: -1046
+
+  - id: zhou_dynasty
+    name: Zhou Dynasty
+    approximate_start_year: -1046
+    approximate_end_year: -256
+
+  - id: qin_han_china
+    name: Qin and Han China
+    approximate_start_year: -221
+    approximate_end_year: 220
+
+  - id: tang_dynasty
+    name: Tang Dynasty
+    approximate_start_year: 618
+    approximate_end_year: 907
+
+  - id: mongol_empire
+    name: Mongol Empire
+    approximate_start_year: 1206
+    approximate_end_year: 1368
+
+  - id: yamato_japan
+    name: Yamato and Asuka Japan
+    approximate_start_year: 250
+    approximate_end_year: 710
+
+  - id: khmer_empire
+    name: Khmer Empire
+    approximate_start_year: 802
+    approximate_end_year: 1431
+
+  # --- Islamic world ---
+  - id: rashidun_caliphate
+    name: Rashidun Caliphate
+    approximate_start_year: 632
+    approximate_end_year: 661
+
+  - id: abbasid_caliphate
+    name: Abbasid Caliphate
+    approximate_start_year: 750
+    approximate_end_year: 1258
+
+  # --- Americas ---
+  - id: olmec_civilization
+    name: Olmec Civilization
+    approximate_start_year: -1400
+    approximate_end_year: -400
+
+  - id: maya_civilization
+    name: Maya Civilization
+    approximate_start_year: -2000
+    approximate_end_year: 1697
+
+  - id: teotihuacan
+    name: Teotihuacan
+    approximate_start_year: -100
+    approximate_end_year: 550
+
+  - id: aztec_empire
+    name: Aztec Empire
+    approximate_start_year: 1428
+    approximate_end_year: 1521
+
+  - id: inca_empire
+    name: Inca Empire
+    approximate_start_year: 1438
+    approximate_end_year: 1533
+
+  # --- Oceania ---
+  - id: polynesian_expansion
+    name: Polynesian Expansion
+    approximate_start_year: -1500
+    approximate_end_year: 1300

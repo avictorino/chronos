@@ -252,6 +252,14 @@ this person's name in other languages/scripts (this is what lets entity
 resolution avoid creating duplicate people for the same person cited under a
 different spelling).
 
+Also list, by name only (they get expanded individually later, do not describe
+them here): `notable_events` — other historical events this person was
+significantly involved in beyond what's already implied by the civilization
+context above — and `associated_places` — places significantly tied to this
+person (birthplace, capital, battlefield, tomb, etc.). Leave either list empty
+rather than inventing entries; only include names you're reasonably confident
+are real and distinct from what's already known.
+
 {_CANDIDATE_KNOWLEDGE_NOTICE}"""
 
 
@@ -282,6 +290,14 @@ Provide: canonical name, aliases (variant spellings/transliterations), a
 summary, whether it is best classified as a PLACE/CITY/REGION, an approximate
 latitude/longitude if reasonably known (mark as a best guess, not authoritative),
 the modern country, and the ancient region/province it belonged to.
+
+Also list, by name only (they get expanded individually later, do not describe
+them here): `notable_events` — historical events that happened at or centrally
+involved this place beyond what's already implied by the civilization context
+above — and `notable_people` — people significantly associated with this place
+(rulers, founders, famous residents, etc.). Leave either list empty rather than
+inventing entries; only include names you're reasonably confident are real and
+distinct from what's already known.
 
 {_CANDIDATE_KNOWLEDGE_NOTICE}"""
 

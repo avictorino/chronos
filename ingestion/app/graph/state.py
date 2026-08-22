@@ -56,9 +56,15 @@ class IngestionState(TypedDict):
 
     pending_people: list[dict]
     processed_people: list[str]
+    # Set once discover_people has made its one-shot LLM discovery call —
+    # guards against re-running it when the events/people/places loop revisits
+    # the people stage for recursively-queued candidates. See
+    # graph/nodes.py::_route_after_stage.
+    people_discovery_done: bool
 
     pending_places: list[dict]
     processed_places: list[str]
+    places_discovery_done: bool
 
     # Subjects for extract_relationships/generate_claims/generate_chunks —
     # populated incrementally by expand_events/expand_people/expand_places and

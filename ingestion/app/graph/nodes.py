@@ -1,17 +1,32 @@
 """LangGraph node functions.
 
-Discovery nodes (`discover_events`/`discover_people`/`discover_places`) and
-the two finishing nodes (`generate_chunks`, `generate_embeddings`,
-`persist_graph`) return plain dict updates and use static edges.
+`discover_events` and the three finishing nodes (`generate_chunks`,
+`generate_embeddings`, `persist_graph`) return plain dict updates and use
+static edges. `entity_resolution` also returns a plain dict (single pass, no
+self-loop needed).
 
-Expansion/extraction nodes (`expand_events`, `expand_people`, `expand_places`,
-`extract_relationships`, `generate_claims`) return `Command` and self-loop:
-each call processes a batch of up to `LLM_CONCURRENCY` pending items — the LLM
-calls in that batch run concurrently via `asyncio.gather` (phase A), then
-entity resolution + persistence + state bookkeeping for the batch happen
-strictly sequentially, in order (phase B) — see spec/03-architecture-spec.md
-for why that split exists (resolve-then-write is not atomic, so it can't be
-parallelized without risking duplicate entities).
+Every other node returns `Command` and routes dynamically via
+`_route_after_stage` (or, for `extract_relationships`/`generate_claims`, a
+local self-loop): each call processes a batch of up to `LLM_CONCURRENCY`
+pending items — the LLM calls in that batch run concurrently via
+`asyncio.gather` (phase A), then entity resolution + persistence + state
+bookkeeping for the batch happen strictly sequentially, in order (phase B) —
+see spec/03-architecture-spec.md for why that split exists (resolve-then-write
+is not atomic, so it can't be parallelized without risking duplicate
+entities).
+
+`discover_people`/`discover_places` are also `Command` nodes now: each makes
+its one-shot LLM discovery call exactly once (guarded by their
+`*_discovery_done` flag) and then falls into the same `_route_after_stage`
+decision as `expand_events`/`expand_people`/`expand_places`. This is what
+makes expansion genuinely recursive — an event can surface new people/places,
+a person can surface new events/places, a place can surface new events/people
+(see `_enqueue_mentions`) — with `_route_after_stage` revisiting whichever
+stage has queued work, in events -> people -> places order, until all three
+are simultaneously empty. Recursion depth is capped by `max_expansion_depth`
+(hops from the civilization root); volume per kind is capped by
+`max_*_per_civilization`, counted across initial discovery plus everything
+recursively queued.
 """
 
 from __future__ import annotations
@@ -24,7 +39,7 @@ from typing import TypeVar
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from app.domain.enums import EntityType
+from app.domain.enums import EntityType, EventType
 from app.domain.models import (
     AnyEntity,
     Civilization,
@@ -117,6 +132,94 @@ def _log_resolution_merge(candidate_name: str, resolution) -> None:  # noqa: ANN
     )
 
 
+# --- recursive expansion helpers ------------------------------------------------
+#
+# "True" recursion: expanding an event surfaces people/places it mentions,
+# expanding a person surfaces events/places, expanding a place surfaces
+# events/people — each recursively queued at depth+1 (capped by
+# `max_expansion_depth`, a hop count from the civilization root) and against a
+# per-kind budget (`max_*_per_civilization`, counted across initial discovery
+# *and* everything recursively queued so far). `_route_after_stage` is the
+# shared control-flow decision that keeps revisiting whichever of the three
+# stages still has queued work until all three are simultaneously empty.
+
+
+def _norm_name(name: str) -> str:
+    return name.strip().lower()
+
+
+def _name_known(name: str, entities: dict[str, dict], events: dict[str, dict]) -> bool:
+    """True if `name` already matches a known entity or event (by canonical
+    name or alias) — takes the caller's locally-updated dicts (not raw
+    `state`) so a name resolved earlier in the *same* batch is already seen."""
+    needle = _norm_name(name)
+    if not needle:
+        return True
+    for entity in entities.values():
+        pool = [entity["canonical_name"], *entity.get("aliases", [])]
+        if any(_norm_name(p) == needle for p in pool):
+            return True
+    for event in events.values():
+        pool = [event["name"], *event.get("aliases", [])]
+        if any(_norm_name(p) == needle for p in pool):
+            return True
+    return False
+
+
+def _name_pending(name: str, pending: list[dict]) -> bool:
+    needle = _norm_name(name)
+    return any(_norm_name(item.get("name", "")) == needle for item in pending)
+
+
+def _enqueue_mentions(
+    names: list[str],
+    *,
+    depth: int,
+    max_depth: int,
+    budget: int,
+    entities: dict[str, dict],
+    events: dict[str, dict],
+    pending: list[dict],
+    extra_fields: dict,
+) -> None:
+    """Queues by-name-only mentions surfaced during expansion as new
+    candidates for the matching discover_*/expand_* pair, mutating `pending`
+    in place. No-op past `max_depth` hops, past `budget` total candidates for
+    this kind, or for a name that's already known/queued."""
+    if depth > max_depth:
+        return
+    for name in names:
+        name = name.strip()
+        if not name:
+            continue
+        if len(pending) >= budget:
+            break
+        if _name_known(name, entities, events) or _name_pending(name, pending):
+            continue
+        pending.append({"name": name, "_depth": depth, **extra_fields})
+
+
+def _route_after_stage(state: IngestionState) -> str:
+    """Shared 'what's next' decision for the events/people/places expansion
+    loop. discover_people/discover_places each run their one-shot LLM
+    discovery call exactly once (guarded by their *_discovery_done flag);
+    after that, this keeps revisiting whichever stage has recursively-queued
+    work — in events -> people -> places order — until every queue is
+    simultaneously empty, at which point the pipeline moves on to
+    extract_relationships."""
+    if state["pending_events"]:
+        return "expand_events"
+    if not state["people_discovery_done"]:
+        return "discover_people"
+    if state["pending_people"]:
+        return "expand_people"
+    if not state["places_discovery_done"]:
+        return "discover_places"
+    if state["pending_places"]:
+        return "expand_places"
+    return "extract_relationships"
+
+
 # --- linear nodes --------------------------------------------------------------
 
 
@@ -175,36 +278,57 @@ async def discover_events(state: IngestionState, config: RunnableConfig) -> dict
     result = await deps.llm_client.generate_structured(prompt, EventCandidateList)
     items = result.items[: deps.settings.max_events_per_civilization]
     log.info("LLM", f"Found {len(items)} candidate events")
-    return {"pending_events": [c.model_dump(mode="json") for c in items], "processed_events": []}
+    pending = [{**c.model_dump(mode="json"), "_depth": 0} for c in items]
+    return {"pending_events": pending, "processed_events": []}
 
 
-async def discover_people(state: IngestionState, config: RunnableConfig) -> dict:
+async def discover_people(state: IngestionState, config: RunnableConfig) -> Command:
+    """One-shot LLM discovery (guarded by people_discovery_done so the
+    events/people/places loop never re-runs it) — merges its own candidates
+    onto whatever expand_events already queued recursively, deduping by name,
+    and only asks the LLM for however much budget is left."""
     deps = _deps(config)
     profile = CivilizationProfile.model_validate(state["profile"])
     event_names = [e["name"] for e in state["events"].values()]
-    log.info("LLM", "Discovering people", civilization=profile.canonical_name)
-    prompt = build_person_discovery_prompt(profile, event_names, deps.settings.max_people_per_civilization)
-    result = await deps.llm_client.generate_structured(prompt, PersonCandidateList)
-    items = result.items[: deps.settings.max_people_per_civilization]
-    log.info("LLM", f"Found {len(items)} candidate people")
-    return {"pending_people": [c.model_dump(mode="json") for c in items], "processed_people": []}
+
+    pending = list(state["pending_people"])
+    remaining_budget = max(0, deps.settings.max_people_per_civilization - len(pending))
+    if remaining_budget > 0:
+        log.info("LLM", "Discovering people", civilization=profile.canonical_name)
+        prompt = build_person_discovery_prompt(profile, event_names, remaining_budget)
+        result = await deps.llm_client.generate_structured(prompt, PersonCandidateList)
+        for c in result.items[:remaining_budget]:
+            if _name_known(c.name, state["entities"], state["events"]) or _name_pending(c.name, pending):
+                continue
+            pending.append({**c.model_dump(mode="json"), "_depth": 0})
+    log.info("LLM", f"{len(pending)} candidate people queued total (incl. recursively discovered)")
+
+    update = {"pending_people": pending, "processed_people": [], "people_discovery_done": True}
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
-async def discover_places(state: IngestionState, config: RunnableConfig) -> dict:
+async def discover_places(state: IngestionState, config: RunnableConfig) -> Command:
     deps = _deps(config)
     profile = CivilizationProfile.model_validate(state["profile"])
     event_names = [e["name"] for e in state["events"].values()]
     person_names = [
         e["canonical_name"] for e in state["entities"].values() if e.get("entity_type") == "PERSON"
     ]
-    log.info("LLM", "Discovering places", civilization=profile.canonical_name)
-    prompt = build_place_discovery_prompt(
-        profile, event_names, person_names, deps.settings.max_places_per_civilization
-    )
-    result = await deps.llm_client.generate_structured(prompt, PlaceCandidateList)
-    items = result.items[: deps.settings.max_places_per_civilization]
-    log.info("LLM", f"Found {len(items)} candidate places")
-    return {"pending_places": [c.model_dump(mode="json") for c in items], "processed_places": []}
+
+    pending = list(state["pending_places"])
+    remaining_budget = max(0, deps.settings.max_places_per_civilization - len(pending))
+    if remaining_budget > 0:
+        log.info("LLM", "Discovering places", civilization=profile.canonical_name)
+        prompt = build_place_discovery_prompt(profile, event_names, person_names, remaining_budget)
+        result = await deps.llm_client.generate_structured(prompt, PlaceCandidateList)
+        for c in result.items[:remaining_budget]:
+            if _name_known(c.name, state["entities"], state["events"]) or _name_pending(c.name, pending):
+                continue
+            pending.append({**c.model_dump(mode="json"), "_depth": 0})
+    log.info("LLM", f"{len(pending)} candidate places queued total (incl. recursively discovered)")
+
+    update = {"pending_places": pending, "processed_places": [], "places_discovery_done": True}
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
 # --- self-looping expansion nodes -----------------------------------------------
@@ -214,7 +338,7 @@ async def expand_events(state: IngestionState, config: RunnableConfig) -> Comman
     deps = _deps(config)
     pending = state["pending_events"]
     if not pending:
-        return Command(goto="discover_people")
+        return Command(goto=_route_after_stage(state))
 
     profile = CivilizationProfile.model_validate(state["profile"])
 
@@ -226,11 +350,14 @@ async def expand_events(state: IngestionState, config: RunnableConfig) -> Comman
     batch, rest = await _gather_batch(pending, deps.settings.llm_concurrency, call)
 
     events = dict(state["events"])
+    entities = dict(state["entities"])
     processed = list(state["processed_events"])
     errors = list(state["errors"])
     relationship_subjects = list(state["pending_relationship_subjects"])
     claim_subjects = list(state["pending_claim_subjects"])
     chunk_subjects = list(state["pending_chunk_subjects"])
+    new_pending_people = list(state["pending_people"])
+    new_pending_places = list(state["pending_places"])
 
     for candidate_dict, result in batch:
         candidate = EventCandidate.model_validate(candidate_dict)
@@ -246,6 +373,29 @@ async def expand_events(state: IngestionState, config: RunnableConfig) -> Comman
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
             chunk_subjects.append(subject)
+
+            depth = candidate_dict.get("_depth", 0) + 1
+            mention_note = f"Mentioned in the event '{event.name}'; discovered via recursive expansion."
+            _enqueue_mentions(
+                result.people,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_people_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_people,
+                extra_fields={"short_description": mention_note},
+            )
+            _enqueue_mentions(
+                result.places,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_places_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_places,
+                extra_fields={"short_description": mention_note},
+            )
         except Exception as exc:  # noqa: BLE001 - isolate per-item failure, keep looping
             errors.append(_error("expand_events", candidate.name, exc))
 
@@ -257,15 +407,17 @@ async def expand_events(state: IngestionState, config: RunnableConfig) -> Comman
         "pending_relationship_subjects": relationship_subjects,
         "pending_claim_subjects": claim_subjects,
         "pending_chunk_subjects": chunk_subjects,
+        "pending_people": new_pending_people,
+        "pending_places": new_pending_places,
     }
-    return Command(update=update, goto="expand_events" if rest else "discover_people")
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
 async def expand_people(state: IngestionState, config: RunnableConfig) -> Command:
     deps = _deps(config)
     pending = state["pending_people"]
     if not pending:
-        return Command(goto="discover_places")
+        return Command(goto=_route_after_stage(state))
 
     profile = CivilizationProfile.model_validate(state["profile"])
 
@@ -277,11 +429,14 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
     batch, rest = await _gather_batch(pending, deps.settings.llm_concurrency, call)
 
     entities = dict(state["entities"])
+    events = dict(state["events"])
     processed = list(state["processed_people"])
     errors = list(state["errors"])
     relationship_subjects = list(state["pending_relationship_subjects"])
     claim_subjects = list(state["pending_claim_subjects"])
     chunk_subjects = list(state["pending_chunk_subjects"])
+    new_pending_events = list(state["pending_events"])
+    new_pending_places = list(state["pending_places"])
 
     for candidate_dict, result in batch:
         candidate = PersonCandidate.model_validate(candidate_dict)
@@ -328,6 +483,29 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
             chunk_subjects.append(subject)
+
+            depth = candidate_dict.get("_depth", 0) + 1
+            mention_note = f"Mentioned in connection with {person.canonical_name}; discovered via recursive expansion."
+            _enqueue_mentions(
+                result.notable_events,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_events_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_events,
+                extra_fields={"event_type": EventType.GENERIC.value, "short_description": mention_note},
+            )
+            _enqueue_mentions(
+                result.associated_places,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_places_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_places,
+                extra_fields={"short_description": mention_note},
+            )
         except Exception as exc:  # noqa: BLE001
             errors.append(_error("expand_people", candidate.name, exc))
 
@@ -339,15 +517,17 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
         "pending_relationship_subjects": relationship_subjects,
         "pending_claim_subjects": claim_subjects,
         "pending_chunk_subjects": chunk_subjects,
+        "pending_events": new_pending_events,
+        "pending_places": new_pending_places,
     }
-    return Command(update=update, goto="expand_people" if rest else "discover_places")
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
 async def expand_places(state: IngestionState, config: RunnableConfig) -> Command:
     deps = _deps(config)
     pending = state["pending_places"]
     if not pending:
-        return Command(goto="extract_relationships")
+        return Command(goto=_route_after_stage(state))
 
     profile = CivilizationProfile.model_validate(state["profile"])
 
@@ -359,11 +539,14 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
     batch, rest = await _gather_batch(pending, deps.settings.llm_concurrency, call)
 
     entities = dict(state["entities"])
+    events = dict(state["events"])
     processed = list(state["processed_places"])
     errors = list(state["errors"])
     relationship_subjects = list(state["pending_relationship_subjects"])
     claim_subjects = list(state["pending_claim_subjects"])
     chunk_subjects = list(state["pending_chunk_subjects"])
+    new_pending_events = list(state["pending_events"])
+    new_pending_people = list(state["pending_people"])
 
     for candidate_dict, result in batch:
         candidate = PlaceCandidate.model_validate(candidate_dict)
@@ -413,6 +596,29 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
             chunk_subjects.append(subject)
+
+            depth = candidate_dict.get("_depth", 0) + 1
+            mention_note = f"Mentioned in connection with {place.canonical_name}; discovered via recursive expansion."
+            _enqueue_mentions(
+                result.notable_events,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_events_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_events,
+                extra_fields={"event_type": EventType.GENERIC.value, "short_description": mention_note},
+            )
+            _enqueue_mentions(
+                result.notable_people,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_people_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_people,
+                extra_fields={"short_description": mention_note},
+            )
         except Exception as exc:  # noqa: BLE001
             errors.append(_error("expand_places", candidate.name, exc))
 
@@ -424,8 +630,10 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
         "pending_relationship_subjects": relationship_subjects,
         "pending_claim_subjects": claim_subjects,
         "pending_chunk_subjects": chunk_subjects,
+        "pending_events": new_pending_events,
+        "pending_people": new_pending_people,
     }
-    return Command(update=update, goto="expand_places" if rest else "extract_relationships")
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
 # --- name resolution shared by extract_relationships/generate_claims -----------

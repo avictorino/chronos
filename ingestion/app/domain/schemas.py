@@ -108,6 +108,10 @@ class PersonProfile(BaseModel):
     titles: list[str] = Field(default_factory=list)
     birth_date: HistoricalDate | None = None
     death_date: HistoricalDate | None = None
+    # By-name-only mentions — feed recursive expansion (see
+    # graph/nodes.py::_enqueue_mentions), not expanded here.
+    notable_events: list[str] = Field(default_factory=list)
+    associated_places: list[str] = Field(default_factory=list)
     confidence: float = 0.5
 
 
@@ -129,6 +133,10 @@ class PlaceProfile(BaseModel):
     longitude: float | None = None
     modern_country: str | None = None
     ancient_region: str | None = None
+    # By-name-only mentions — feed recursive expansion (see
+    # graph/nodes.py::_enqueue_mentions), not expanded here.
+    notable_events: list[str] = Field(default_factory=list)
+    notable_people: list[str] = Field(default_factory=list)
     confidence: float = 0.5
 
 

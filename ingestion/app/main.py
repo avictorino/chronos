@@ -2,7 +2,7 @@
 
     python -m app.main ingest --civilization sumer --dry-run
     python -m app.main ingest --civilization sumer
-    python -m app.main ingest --all
+    python -m app.main ingest --all --max-events 100 --max-people 200 --max-places 200
     python -m app.main ingest --civilization sumer --resume <run_id>
     python -m app.main init-schema
 """
@@ -36,7 +36,10 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--max-people", type=int, default=None)
     ingest.add_argument("--max-places", type=int, default=None)
     ingest.add_argument(
-        "--depth", type=int, default=None, help="Reserved for future multi-hop expansion (not used in V1)"
+        "--depth",
+        type=int,
+        default=None,
+        help="Max recursive expansion hops from the civilization root (overrides MAX_EXPANSION_DEPTH)",
     )
     ingest.add_argument("--dry-run", action="store_true", help="Call the LLM and print results, write nothing")
     ingest.add_argument("--resume", metavar="RUN_ID", default=None, help="Resume an interrupted run by its id")
@@ -82,6 +85,7 @@ async def _cmd_ingest(args: argparse.Namespace) -> None:
                 max_events=args.max_events,
                 max_people=args.max_people,
                 max_places=args.max_places,
+                max_depth=args.depth,
             )
         except Exception as exc:  # noqa: BLE001 - one civilization's crash shouldn't stop --all
             failures.append(civilization_id)
