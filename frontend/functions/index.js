@@ -54,18 +54,31 @@ function bucket() {
   return getStorage().bucket();
 }
 
-// Only these get generated automatically — "pessoas, cidades e outros
-// artefatos" from the product ask. Everything else (CIVILIZATION, POLITY,
-// RELIGION, CONCEPT, ...) falls back to the frontend's plain color-dot
-// placeholder for now; add types here later if that changes.
+// Every EntityType (see ingestion/app/domain/enums.py) gets a portrait —
+// deliberately not restricted to a handful of "obviously visual" types.
+// v1 only covered PERSON/PLACE/CITY/REGION/DOCUMENT/TEXT/INSCRIPTION, which
+// silently refused entities like "Ziggurat" (classified CONCEPT, but very
+// much a physical, paintable structure) with no feedback in the UI —
+// confusing from a click. Cost stays bounded either way: each entity is
+// still generated at most once, ever (see the cache check above).
 const ELIGIBLE_TYPES = new Set([
   "PERSON",
   "PLACE",
   "CITY",
   "REGION",
+  "CIVILIZATION",
+  "POLITY",
+  "EMPIRE",
+  "KINGDOM",
+  "DYNASTY",
   "DOCUMENT",
   "TEXT",
   "INSCRIPTION",
+  "RELIGION",
+  "DEITY",
+  "CULTURE",
+  "LANGUAGE",
+  "CONCEPT",
 ]);
 
 const PROMPT_VERSION = "v1";
@@ -106,11 +119,36 @@ function promptFor(entity) {
     );
   }
 
-  // DOCUMENT / TEXT / INSCRIPTION
+  if (["CIVILIZATION", "POLITY", "EMPIRE", "KINGDOM", "DYNASTY"].includes(type)) {
+    return (
+      `Symbolic emblem-style illustration representing the ancient ` +
+      `${type.toLowerCase()} of ${name}.${summary} Banner or crest ` +
+      `composition, painterly historical illustration, no text or watermarks.`
+    );
+  }
+
+  if (type === "DOCUMENT" || type === "TEXT" || type === "INSCRIPTION") {
+    return (
+      `Museum-photography-style image of an ancient artifact: ${name}.` +
+      `${summary} Weathered, period-accurate materials and texture, neutral ` +
+      `studio background, no text or watermarks.`
+    );
+  }
+
+  if (type === "DEITY" || type === "RELIGION") {
+    return (
+      `Ancient religious iconography depicting ${name}.${summary} Statue or ` +
+      `temple-relief style, historically plausible imagery from the period, ` +
+      `painterly illustration, no text or watermarks.`
+    );
+  }
+
+  // CULTURE / LANGUAGE / CONCEPT / anything else — a generic but still
+  // grounded-in-the-summary historical illustration, not a blank fallback.
   return (
-    `Museum-photography-style image of an ancient artifact: ${name}.` +
-    `${summary} Weathered, period-accurate materials and texture, neutral ` +
-    `studio background, no text or watermarks.`
+    `Symbolic historical illustration representing the concept of ${name} ` +
+    `in the ancient world.${summary} Painterly, evocative, no text or ` +
+    `watermarks.`
   );
 }
 

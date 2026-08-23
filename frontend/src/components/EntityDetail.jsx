@@ -26,10 +26,16 @@ function CopyLinkButton() {
   );
 }
 
+const PORTRAIT_STATUS_NOTE = {
+  unavailable: "Sem retrato disponível para esta entidade no momento.",
+  error: "Não foi possível gerar o retrato agora — tente de novo mais tarde.",
+};
+
 /** The portrait slot at the top of the profile card: the cached image once
  * generateEntityImage() has one, the chiseling animation while it's being
- * generated, or the same colored-dot placeholder EntityDetail always used
- * for entity types that don't get a generated portrait. */
+ * generated, or a colored-dot placeholder — with a short note explaining
+ * *why* there's no image when that's a real (non-loading) outcome, instead
+ * of silently showing the same dot for "still loading" and "never will". */
 function Portrait({ entity }) {
   const { status, url } = useEntityImage(entity);
 
@@ -42,6 +48,7 @@ function Portrait({ entity }) {
       ) : (
         <div className="portrait-placeholder">
           <span className="dot" style={{ background: `var(${colorVarForType(entity.entity_type)})` }} />
+          {PORTRAIT_STATUS_NOTE[status] && <span className="portrait-note">{PORTRAIT_STATUS_NOTE[status]}</span>}
         </div>
       )}
     </div>
