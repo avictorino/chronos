@@ -7,15 +7,15 @@ This is a monorepo with two independent projects:
 | Project | Status | What it is |
 |---|---|---|
 | [`ingestion/`](ingestion/README.md) | ✅ implemented | Python pipeline that uses a local LLM (or OpenAI) via LangGraph to generate, validate, deduplicate, and persist historical knowledge into Postgres + pgvector. |
-| [`frontend/`](frontend/README.md) | 🚧 planned, not implemented | Firebase app to browse/visualize the knowledge graph. |
+| [`frontend/`](frontend/README.md) | ✅ implemented (v1) | Firebase-hosted React app that browses/visualizes the knowledge graph, reading Firestore directly with no backend. Live at **https://chronos-29b82.web.app**. |
 
 ## Vision / goal
 
-The mockup below is the target experience for the (not yet built) `frontend/`: a timeline of civilizations, a knowledge-graph panel for the selected entity (person/place/event/document relationships), a map view, and a primary-source evidence panel with confidence scores — all browsing the same graph the `ingestion/` pipeline populates.
+The mockup below was the target experience used to design `frontend/`: a timeline of civilizations, a knowledge-graph panel for the selected entity (person/place/event/document relationships), a map view, and a primary-source evidence panel with confidence scores — all browsing the same graph the `ingestion/` pipeline populates.
 
 ![Chronos frontend vision mockup](docs/vision-mockup.png)
 
-*This is a design mockup of where the product is headed, not a screenshot of working software — `frontend/` hasn't been built yet.*
+*The first implemented version of `frontend/` covers the timeline, entity detail panel (with confidence score and an explicit unverified/AI-generated indicator), and knowledge-graph panel from this mockup — see [`frontend/README.md`](frontend/README.md) for what's live today versus still planned (Map/Library tabs, evidence/genealogy/statistics views).*
 
 ## Data ingested so far
 
@@ -100,4 +100,4 @@ Postgres stays the source of truth for ingestion — `frontend/` never talks to 
 2. ✅ Firestore export — free read mirror for the frontend (see section above).
 3. 🔜 Primary-source ingestion pipeline (historical texts, inscriptions, papers) that creates `SourceClaim`s to confirm/dispute LLM-generated knowledge.
 4. 🔜 Query layer (GraphRAG: vector similarity search + multi-hop traversal) over the exported graph.
-5. 🔜 `frontend/` — visual graph exploration (Firebase).
+5. ✅ `frontend/` (v1) — visual graph exploration (Firebase), live at https://chronos-29b82.web.app. Still 🔜: Map/Graph/Library tabs, evidence/genealogy/statistics views, free-text semantic search (see [`frontend/README.md`](frontend/README.md)).
