@@ -1,8 +1,30 @@
-import React from "react";
+import React, { useState } from "react";
 import { IconWarning } from "./icons";
 import { colorVarForType, formatYearRange } from "../lib/entityStyle";
 import useEntityImage from "../hooks/useEntityImage";
 import AncientLoader from "./AncientLoader";
+
+/** Copies the current permalink (App.jsx keeps `?entity=<id>` in the URL
+ * bar in sync with the selection) so this entity is shareable as-is. */
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch (err) {
+      console.error("[CopyLinkButton] clipboard write failed:", err);
+    }
+  }
+
+  return (
+    <button type="button" className="copy-link-btn" onClick={handleCopy}>
+      {copied ? "Link copiado!" : "Copiar link"}
+    </button>
+  );
+}
 
 /** The portrait slot at the top of the profile card: the cached image once
  * generateEntityImage() has one, the chiseling animation while it's being
@@ -80,7 +102,10 @@ export default function EntityDetail({ entityId, status, entity, neighbors, clai
   return (
     <aside className="detail">
       <Portrait entity={entity} />
-      <h1 className="entity-name">{entity.canonical_name}</h1>
+      <div className="entity-name-row">
+        <h1 className="entity-name">{entity.canonical_name}</h1>
+        <CopyLinkButton />
+      </div>
       <div className="entity-role">{roleFor(entity)}</div>
       {entity.aliases?.length > 0 && (
         <div className="entity-dates">aka {entity.aliases.join(", ")}</div>
