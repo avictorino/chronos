@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # --- Postgres + pgvector ---
     postgres_dsn: str = "postgresql://postgres:postgres@localhost:5432/chronos"
 
+    # --- Firestore export (see app/export/firestore_export.py) ---
+    # Postgres stays the source of truth; this is only used by the
+    # `export-firestore` CLI command to mirror the graph into Firestore for
+    # the frontend to read directly (free Spark plan, no server in between).
+    firebase_project_id: str | None = None
+    # Path to a service-account JSON key (Admin SDK). Leave unset to fall back
+    # to ambient Application Default Credentials (e.g. `gcloud auth
+    # application-default login`) instead.
+    google_application_credentials: str | None = None
+
     # Vector index dimension override. None => auto-detect from the embedding
     # model at first use (see app/persistence/vector.py).
     embedding_dimensions: int | None = None

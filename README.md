@@ -90,9 +90,14 @@ If you already have Postgres+pgvector running locally, you don't need this — j
 
 See [`ingestion/README.md`](ingestion/README.md) for full setup and pipeline instructions.
 
+## Firestore export (free, serverless frontend)
+
+Postgres stays the source of truth for ingestion — `frontend/` never talks to it directly. Instead, `python -m app.main export-firestore` ([ingestion/app/export/firestore_export.py](ingestion/app/export/firestore_export.py)) mirrors everything already ingested into Firestore (project `chronos-29b82`, free Spark plan), including `chunks.embedding` as native Firestore vectors (`find_nearest`, no pgvector needed) and a denormalized `neighbor_ids` list on every entity for 1-hop graph navigation with zero queries. `frontend/` reads that mirror straight from Firestore — no API layer, no cost beyond the free tier. Re-run the export whenever you want Firestore to reflect a fresh `ingest --all` batch.
+
 ## Roadmap
 
 1. ✅ `ingestion/` — generates the knowledge graph from a local LLM.
-2. 🔜 Primary-source ingestion pipeline (historical texts, inscriptions, papers) that creates `SourceClaim`s to confirm/dispute LLM-generated knowledge.
-3. 🔜 Query layer (GraphRAG: `pgvector` similarity search + `WITH RECURSIVE` traversal) over Postgres.
-4. 🔜 `frontend/` — visual graph exploration (Firebase).
+2. ✅ Firestore export — free read mirror for the frontend (see section above).
+3. 🔜 Primary-source ingestion pipeline (historical texts, inscriptions, papers) that creates `SourceClaim`s to confirm/dispute LLM-generated knowledge.
+4. 🔜 Query layer (GraphRAG: vector similarity search + multi-hop traversal) over the exported graph.
+5. 🔜 `frontend/` — visual graph exploration (Firebase).

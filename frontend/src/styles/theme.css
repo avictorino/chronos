@@ -1,0 +1,65 @@
+/* Design tokens lifted from the Chronos design canvas (Main/Search/EntityCard
+   artboards) — see the published canvas for the source of truth on color,
+   type and spacing decisions. */
+:root {
+  --bg: #101216;
+  --bg-raised: #15181e;
+  --panel: #1a1e26;
+  --panel-2: #20242d;
+  --border: #2a2f3a;
+  --border-soft: #242832;
+  --text: #eef0f3;
+  --text-dim: #a3aab6;
+  --text-faint: #6b7280;
+
+  --serif: "Spectral", Georgia, serif;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+
+  --accent: #d4a44c;
+
+  --c-person: #d7ac6a;
+  --c-place: #4fb3ac;
+  --c-civ: #a685d1;
+  --c-event: #d9707a;
+  --c-doc: #8a94a3;
+  --c-polity: #6fa2d6;
+  --c-concept: #7fbf8f;
+
+  --conf-high: #6fbf8b;
+  --conf-med: #d9a441;
+  --conf-low: #d0685f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: #e6b968;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}

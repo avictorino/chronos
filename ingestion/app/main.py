@@ -5,6 +5,7 @@
     python -m app.main ingest --all --max-events 100 --max-people 200 --max-places 200
     python -m app.main ingest --civilization sumer --resume <run_id>
     python -m app.main init-schema
+    python -m app.main export-firestore
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 import sys
 
 from app.config import get_settings
+from app.export.firestore_export import export_to_firestore
 from app.persistence.postgres import PostgresConnection
 from app.persistence.schema import ensure_schema
 from app.services.civilization_service import load_civilizations
@@ -45,6 +47,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--resume", metavar="RUN_ID", default=None, help="Resume an interrupted run by its id")
 
     subparsers.add_parser("init-schema", help="Create Postgres extension/tables/indexes, then exit")
+
+    subparsers.add_parser(
+        "export-firestore",
+        help="Mirror the ingested graph from Postgres into Firestore for the frontend to read",
+    )
 
     return parser
 
@@ -109,6 +116,12 @@ async def _cmd_init_schema() -> None:
     log.info("POSTGRES", "Schema initialized")
 
 
+async def _cmd_export_firestore() -> None:
+    settings = get_settings()
+    counts = await export_to_firestore(settings)
+    log.info("FIRESTORE", "Export finished", **counts)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -120,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_cmd_ingest(args))
     elif args.command == "init-schema":
         asyncio.run(_cmd_init_schema())
+    elif args.command == "export-firestore":
+        asyncio.run(_cmd_export_firestore())
     return 0
 
 
