@@ -125,6 +125,25 @@ export default function RightPanel({ entity, neighbors, onSelectEntity }) {
                 {entity.canonical_name}
               </span>
             </div>
+            {neighbors.length === 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  bottom: 14,
+                  transform: "translateX(-50%)",
+                  width: "88%",
+                  textAlign: "center",
+                  fontSize: 10.5,
+                  color: "var(--text-faint)",
+                  lineHeight: 1.4,
+                }}
+              >
+                No relationships recorded for this entity yet — it may be an
+                auto-created stub (mentioned, but not independently expanded
+                during ingestion).
+              </div>
+            )}
             {neighbors.map(({ entity: n }, i) => {
               const p = positions[i];
               return (
