@@ -13,6 +13,7 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported as isAnalyticsSupported } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBf6NlV4P7whWepKW0BOJKDelpGLa1zEPA",
@@ -30,6 +31,12 @@ export const app = initializeApp(firebaseConfig);
 // entities/events/relationships/claims/chunks collections, neighbor_ids-based
 // graph traversal, and `find_nearest` vector similarity search on chunks.
 export const db = getFirestore(app);
+
+// Used for the on-demand entity-portrait generator (see
+// src/lib/functions.js and functions/index.js) — the only write path in
+// this app, and it never runs on the client: it's a callable Cloud
+// Function, the OpenAI key lives server-side only.
+export const functions = getFunctions(app);
 
 // Analytics only works in a browser (no-op under SSR/build) and isn't
 // supported in every environment — guard it instead of calling

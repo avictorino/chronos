@@ -1,6 +1,30 @@
 import React from "react";
 import { IconWarning } from "./icons";
 import { colorVarForType, formatYearRange } from "../lib/entityStyle";
+import useEntityImage from "../hooks/useEntityImage";
+import AncientLoader from "./AncientLoader";
+
+/** The portrait slot at the top of the profile card: the cached image once
+ * generateEntityImage() has one, the chiseling animation while it's being
+ * generated, or the same colored-dot placeholder EntityDetail always used
+ * for entity types that don't get a generated portrait. */
+function Portrait({ entity }) {
+  const { status, url } = useEntityImage(entity);
+
+  return (
+    <div className="portrait">
+      {status === "ready" && url ? (
+        <img src={url} alt={entity.canonical_name} loading="lazy" />
+      ) : status === "loading" ? (
+        <AncientLoader />
+      ) : (
+        <div className="portrait-placeholder">
+          <span className="dot" style={{ background: `var(${colorVarForType(entity.entity_type)})` }} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function roleFor(entity) {
   if (entity.entity_type === "PERSON") return entity.titles?.[0] ?? "Person";
@@ -55,6 +79,7 @@ export default function EntityDetail({ entityId, status, entity, neighbors, clai
 
   return (
     <aside className="detail">
+      <Portrait entity={entity} />
       <h1 className="entity-name">{entity.canonical_name}</h1>
       <div className="entity-role">{roleFor(entity)}</div>
       {entity.aliases?.length > 0 && (

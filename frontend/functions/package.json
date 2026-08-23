@@ -1,0 +1,20 @@
+{
+  "name": "chronos-functions",
+  "private": true,
+  "version": "0.1.0",
+  "description": "On-demand entity portrait generation for the Chronos frontend (OpenAI Images API, cached in Firebase Storage).",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "deploy": "firebase deploy --only functions",
+    "shell": "firebase functions:shell",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2",
+    "openai": "^7.5.0"
+  }
+}

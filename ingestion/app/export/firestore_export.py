@@ -56,11 +56,18 @@ def _build_client(settings: Settings) -> firestore.AsyncClient:
 async def _commit_documents(
     db: firestore.AsyncClient, collection: str, documents: dict[str, dict[str, Any]]
 ) -> int:
+    # merge=True (not a plain overwrite): the `entities` collection now also
+    # carries image_url/image_generated_at/image_model/image_prompt_version,
+    # written directly by the on-demand image-generation Cloud Function
+    # (functions/index.js) and never present in Postgres. A plain overwrite
+    # here would wipe those fields out on every re-export. merge=True keeps
+    # every Postgres-sourced field fully up to date as before, it just no
+    # longer deletes fields this export never wrote in the first place.
     items = list(documents.items())
     for start in range(0, len(items), _BATCH_LIMIT):
         batch = db.batch()
         for doc_id, payload in items[start : start + _BATCH_LIMIT]:
-            batch.set(db.collection(collection).document(doc_id), payload)
+            batch.set(db.collection(collection).document(doc_id), payload, merge=True)
         await batch.commit()
     return len(items)
 

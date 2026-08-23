@@ -1,5 +1,38 @@
 import React, { useMemo } from "react";
 import { colorVarForType } from "../lib/entityStyle";
+import useEntityImage from "../hooks/useEntityImage";
+import AncientLoader from "./AncientLoader";
+
+/** One graph node's avatar: the cached portrait once it exists, the
+ * chiseling animation while generateEntityImage() is working on it, or the
+ * plain colored dot the graph always used — same three states as the
+ * profile card's Portrait (EntityDetail.jsx), just sized for a node. */
+function NodeAvatar({ entity, size, ring }) {
+  const { status, url } = useEntityImage(entity);
+  const style = {
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    overflow: "hidden",
+    border: ring,
+    background: `var(${colorVarForType(entity.entity_type)})`,
+  };
+  if (status === "ready" && url) {
+    return (
+      <div style={style}>
+        <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </div>
+    );
+  }
+  if (status === "loading") {
+    return (
+      <div style={style}>
+        <AncientLoader compact />
+      </div>
+    );
+  }
+  return <div style={style} />;
+}
 
 const LEGEND = [
   { label: "Person", varName: "--c-person" },
@@ -112,15 +145,7 @@ export default function RightPanel({ entity, neighbors, onSelectEntity }) {
                 gap: 4,
               }}
             >
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  background: `var(${colorVarForType(entity.entity_type)})`,
-                  border: "2px solid var(--accent)",
-                }}
-              />
+              <NodeAvatar entity={entity} size={36} ring="2px solid var(--accent)" />
               <span style={{ fontSize: 9, color: "var(--text-dim)", background: "rgba(16,18,22,.75)", padding: "1px 6px", borderRadius: 5 }}>
                 {entity.canonical_name}
               </span>
@@ -162,15 +187,7 @@ export default function RightPanel({ entity, neighbors, onSelectEntity }) {
                     cursor: "pointer",
                   }}
                 >
-                  <div
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      background: `var(${colorVarForType(n.entity_type)})`,
-                      border: "2px solid var(--bg-raised)",
-                    }}
-                  />
+                  <NodeAvatar entity={n} size={22} ring="2px solid var(--bg-raised)" />
                   <span style={{ fontSize: 9, color: "var(--text-dim)", background: "rgba(16,18,22,.75)", padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
                     {n.canonical_name}
                   </span>

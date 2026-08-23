@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Same posture as firestore.rules: public read, no client write. Entity
+// portraits are only ever written by the `generateEntityImage` Cloud
+// Function (Admin SDK, bypasses these rules entirely) — nothing in the
+// frontend ever writes to Storage.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

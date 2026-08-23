@@ -147,6 +147,111 @@
   color: var(--text-faint);
   line-height: 1.6;
 }
+
+/* ---------- entity portrait (generateEntityImage, on-demand + cached) --- */
+.portrait {
+  width: 100%;
+  height: 220px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+}
+.portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.portrait-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.portrait-placeholder .dot {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+}
+
+.ancient-loader {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ancient-loader-svg {
+  width: 70%;
+  max-width: 150px;
+}
+.ancient-loader-caption {
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.2px;
+}
+.ancient-loader.compact {
+  gap: 0;
+}
+.al-pulse-dot {
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: al-pulse 1s ease-in-out infinite;
+}
+@keyframes al-pulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.al-arm {
+  transform-origin: 96px 88px;
+  animation: al-chisel 0.9s ease-in-out infinite;
+}
+.al-sparks {
+  animation: al-spark 0.9s ease-in-out infinite;
+}
+@keyframes al-chisel {
+  0%, 100% {
+    transform: rotate(-16deg);
+  }
+  50% {
+    transform: rotate(10deg);
+  }
+}
+@keyframes al-spark {
+  0%, 40% {
+    opacity: 0;
+  }
+  55% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .al-arm,
+  .al-sparks,
+  .al-pulse-dot {
+    animation: none;
+  }
+}
+
 .entity-name {
   font-family: var(--serif);
   font-size: 22px;
