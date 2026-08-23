@@ -2,28 +2,29 @@
 // down to the 7 legend colors used across the design canvas. `entity_type` on
 // a document is the finer-grained enum (e.g. "kingdom"), so this normalizes
 // it to the coarser tag the color legend is drawn at.
+// Matches ingestion/app/domain/enums.py::EntityType (values are uppercase).
 const TYPE_TO_COLOR_VAR = {
-  civilization: "--c-civ",
-  person: "--c-person",
-  place: "--c-place",
-  city: "--c-place",
-  region: "--c-place",
-  polity: "--c-polity",
-  empire: "--c-polity",
-  kingdom: "--c-polity",
-  dynasty: "--c-polity",
-  document: "--c-doc",
-  text: "--c-doc",
-  inscription: "--c-doc",
-  religion: "--c-concept",
-  deity: "--c-concept",
-  culture: "--c-concept",
-  language: "--c-concept",
-  concept: "--c-concept",
+  CIVILIZATION: "--c-civ",
+  PERSON: "--c-person",
+  PLACE: "--c-place",
+  CITY: "--c-place",
+  REGION: "--c-place",
+  POLITY: "--c-polity",
+  EMPIRE: "--c-polity",
+  KINGDOM: "--c-polity",
+  DYNASTY: "--c-polity",
+  DOCUMENT: "--c-doc",
+  TEXT: "--c-doc",
+  INSCRIPTION: "--c-doc",
+  RELIGION: "--c-concept",
+  DEITY: "--c-concept",
+  CULTURE: "--c-concept",
+  LANGUAGE: "--c-concept",
+  CONCEPT: "--c-concept",
 };
 
 export function colorVarForType(entityType) {
-  return TYPE_TO_COLOR_VAR[entityType] ?? "--c-doc";
+  return TYPE_TO_COLOR_VAR[entityType?.toUpperCase()] ?? "--c-doc";
 }
 
 export function confidenceColorVar(confidence) {

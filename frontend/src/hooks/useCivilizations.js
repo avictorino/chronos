@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { listEntitiesByTypes } from "../lib/firestore";
 
-const TIMELINE_TYPES = ["civilization", "polity", "empire", "kingdom", "dynasty"];
+// Matches ingestion/app/domain/enums.py::EntityType — values are stored
+// uppercase in Postgres/Firestore (Python `str, Enum` members whose value
+// equals their name).
+const TIMELINE_TYPES = ["CIVILIZATION", "POLITY", "EMPIRE", "KINGDOM", "DYNASTY"];
 
 /** Every civilization/polity-like entity, sorted by start year — the rows of
  * the center Timeline panel. */

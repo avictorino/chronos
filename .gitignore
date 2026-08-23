@@ -27,6 +27,12 @@ build/
 firebase-debug.log
 *.log
 
+# Firebase/GCP service-account keys — never commit (Admin SDK credentials)
+*firebase-adminsdk*.json
+serviceAccountKey.json
+service-account*.json
+ingestion/*.pem
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db

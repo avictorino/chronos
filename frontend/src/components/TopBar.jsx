@@ -60,7 +60,7 @@ export default function TopBar({ onSelectEntity }) {
                 }}
               >
                 <span>{r.canonical_name}</span>
-                <span className="search-result-type">{r.entity_type}</span>
+                <span className="search-result-type">{r.entity_type?.toLowerCase()}</span>
               </div>
             ))}
           </div>

@@ -22,6 +22,7 @@ from typing import Any
 
 from google.cloud import firestore
 from google.cloud.firestore_v1.vector import Vector
+from google.oauth2 import service_account
 
 from app.config import Settings
 from app.persistence.postgres import PostgresConnection, parse_vector
@@ -36,10 +37,20 @@ _BATCH_LIMIT = 400
 def _build_client(settings: Settings) -> firestore.AsyncClient:
     if not settings.firebase_project_id:
         raise RuntimeError("FIREBASE_PROJECT_ID is not set — required for `export-firestore`.")
-    # Credentials: GOOGLE_APPLICATION_CREDENTIALS (service-account JSON) if
-    # set, otherwise ambient Application Default Credentials. Either way this
-    # is the Admin SDK — only ever used from this script, never the frontend.
-    return firestore.AsyncClient(project=settings.firebase_project_id)
+    # Load the service-account key file explicitly rather than relying on the
+    # GOOGLE_APPLICATION_CREDENTIALS *process* env var — pydantic-settings
+    # reads .env into this Settings object without exporting it to os.environ,
+    # so google.auth.default() would never see it otherwise. Falls back to
+    # ambient Application Default Credentials (e.g. gcloud auth
+    # application-default login) when no key path is configured.
+    credentials = None
+    if settings.google_application_credentials:
+        credentials = service_account.Credentials.from_service_account_file(
+            settings.google_application_credentials
+        )
+    # This is the Admin SDK — only ever used from this script, never shipped
+    # to the frontend (which reads Firestore with the public web config).
+    return firestore.AsyncClient(project=settings.firebase_project_id, credentials=credentials)
 
 
 async def _commit_documents(

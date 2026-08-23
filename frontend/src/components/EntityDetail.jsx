@@ -3,9 +3,9 @@ import { IconWarning } from "./icons";
 import { colorVarForType, formatYearRange } from "../lib/entityStyle";
 
 function roleFor(entity) {
-  if (entity.entity_type === "person") return entity.titles?.[0] ?? "Person";
+  if (entity.entity_type === "PERSON") return entity.titles?.[0] ?? "Person";
   const range = formatYearRange(entity.start_year, entity.end_year);
-  return [entity.entity_type, range].filter(Boolean).join(" · ");
+  return [entity.entity_type?.toLowerCase(), range].filter(Boolean).join(" · ");
 }
 
 export default function EntityDetail({ entityId, status, entity, neighbors, claims, onSelectEntity }) {
