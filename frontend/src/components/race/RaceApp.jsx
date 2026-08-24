@@ -19,7 +19,7 @@ import Leaderboard from "./Leaderboard";
 // (countdown -> active -> finished) for the rest, since the match doc is
 // the single source of truth there.
 export default function RaceApp({ onClose }) {
-  const { uid, loading: authLoading } = useAuthUser();
+  const { uid, loading: authLoading, error: authError } = useAuthUser();
   const { status: usernameStatus, username, setUsername } = useUsername(uid);
   const [pairId, setPairId] = useState(null);
   const [matchId, setMatchId] = useState(null);
@@ -66,6 +66,18 @@ export default function RaceApp({ onClose }) {
   let body;
   if (showLeaderboard) {
     body = <Leaderboard onBack={() => setShowLeaderboard(false)} />;
+  } else if (authError) {
+    // Most likely cause: Firebase Authentication isn't enabled yet for this
+    // project (Firebase Console -> Authentication -> get started -> enable
+    // the Anonymous provider) — signInAnonymously fails with
+    // CONFIGURATION_NOT_FOUND before that's done. Surfacing this instead of
+    // hanging on "Conectando…" forever (see useAuthUser.js).
+    body = (
+      <div className="state-msg">
+        Não deu pra conectar ({authError.code || "erro desconhecido"}). Se você é quem administra o app, confirme que a
+        autenticação anônima está habilitada no Firebase Console.
+      </div>
+    );
   } else if (authLoading || usernameStatus === "loading") {
     body = <div className="state-msg">Conectando…</div>;
   } else if (usernameStatus === "unknown") {
