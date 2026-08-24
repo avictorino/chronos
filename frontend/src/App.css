@@ -433,22 +433,16 @@
   min-height: 0;
 }
 .graph-area {
-  flex: 3 1 0;
+  flex: 7 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 14px 18px 8px;
   position: relative;
-}
-.graph-area-title {
-  margin-bottom: 8px;
 }
 .kg-canvas {
   flex: 1;
   min-height: 0;
   background: var(--bg-raised);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
   overflow: hidden;
 }
 .kg-canvas svg {
@@ -489,19 +483,16 @@
 }
 
 /* ---------- horizontal chronology strip ---------- */
+/* flex: 3 (chrono) vs 7 (graph-area above) = chrono gets 30% of the center
+   column's height — was 1:3 (25%); +20% relative (25% * 1.2 = 30%), plus
+   reclaiming the space the removed title/subtitle row used to take. */
 .chrono {
-  flex: 1 1 0;
+  flex: 3 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border);
   padding: 10px 18px 14px;
-}
-.chrono-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 6px;
 }
 .chrono-scroll {
   flex: 1;
@@ -532,6 +523,24 @@
 .chrono-row.selected .chrono-bar {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* The closest chronological match for a selection that isn't itself one of
+   the plotted civilizations (e.g. a person, via birth/death year) — a
+   dashed ring instead of the solid "selected" outline, so it reads as
+   "nearby", not "this exact row is what you picked". */
+.chrono-row.nearest .chrono-bar {
+  outline: 2px dashed var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+}
+.chrono-year-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
 }
 .chrono-bar {
   position: absolute;

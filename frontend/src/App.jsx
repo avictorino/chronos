@@ -55,10 +55,9 @@ export default function App() {
         </div>
         <div className="center-col">
           <div className="graph-area">
-            <div className="panel-title graph-area-title">Knowledge Graph</div>
             <KnowledgeGraph entity={entity} neighbors={neighbors} onSelectEntity={setSelectedEntityId} />
           </div>
-          <HorizontalTimeline selectedEntityId={selectedEntityId} onSelectEntity={setSelectedEntityId} />
+          <HorizontalTimeline entity={entity} onSelectEntity={setSelectedEntityId} />
         </div>
       </div>
     </div>
