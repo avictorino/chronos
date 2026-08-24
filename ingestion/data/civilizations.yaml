@@ -16,6 +16,22 @@
 # humanity", not "history of one region").
 
 civilizations:
+  # --- Already in progress: kept first so the nightly --shard 0/2 and
+  # --shard 1/2 tasks (see ingestion/scripts/) each reach these before
+  # anything else — assyria is index 0 (shard 0), babylon is index 1
+  # (shard 1), matching the checkpoint DBs each shard resumes from. ---
+  - id: assyria
+    name: Assyria
+    approximate_start_year: -2500
+    approximate_end_year: -609
+    importance_score: 8
+
+  - id: babylon
+    name: Babylon
+    approximate_start_year: -1894
+    approximate_end_year: -539
+    importance_score: 8
+
   # --- Mesopotamia / Near East ---
   - id: sumer
     name: Sumer
@@ -28,18 +44,6 @@ civilizations:
     approximate_start_year: -2334
     approximate_end_year: -2154
     importance_score: 6
-
-  - id: assyria
-    name: Assyria
-    approximate_start_year: -2500
-    approximate_end_year: -609
-    importance_score: 8
-
-  - id: babylon
-    name: Babylon
-    approximate_start_year: -1894
-    approximate_end_year: -539
-    importance_score: 8
 
   - id: elam
     name: Elam
