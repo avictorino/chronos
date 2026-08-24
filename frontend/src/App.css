@@ -460,6 +460,9 @@
   stroke-width: 3px;
   pointer-events: none;
 }
+/* Hidden until the (invisible, wide-hit-area) line under the cursor is
+   hovered — see linkHitSel in KnowledgeGraph.jsx. Rendering all relation
+   labels at once is what turned the graph into text soup. */
 .kg-link-label {
   text-anchor: middle;
   font-size: 8.5px;
@@ -468,6 +471,21 @@
   stroke: var(--bg-raised);
   stroke-width: 3px;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.kg-link-label-visible {
+  opacity: 1;
+}
+/* 2nd-hop node labels are hidden by default too, for the same reason —
+   only reveal one on hovering its node. 1st-hop/center labels always
+   show; there are few enough of those to not need this. */
+.kg-node-label-hop2 {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.kg-node-hovered .kg-node-label-hop2 {
+  opacity: 1;
 }
 .kg-legend {
   position: absolute;
@@ -480,6 +498,23 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 6px 10px;
+}
+.kg-expand-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 18px;
+  background: rgba(16, 18, 22, 0.75);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 11px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.kg-expand-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ---------- horizontal chronology strip ---------- */

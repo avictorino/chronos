@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from "d3-force";
+import React, { useEffect, useRef, useState } from "react";
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceRadial } from "d3-force";
 import { select } from "d3-selection";
 import { drag as d3drag } from "d3-drag";
 import { zoom as d3zoom } from "d3-zoom";
@@ -9,6 +9,13 @@ import useGraphData from "../hooks/useGraphData";
 const R_CENTER = 26;
 const R_HOP1 = 16;
 const R_HOP2 = 10;
+
+// Concentric rings by hop — the single biggest declutter for a busy
+// neighborhood: without this, forceManyBody's repulsion alone still lets
+// distant nodes drift anywhere, which is what produced the tangled mess in
+// the reported screenshot. Radius/strength only, center node untouched.
+const RING_RADIUS = { 1: 150, 2: 280 };
+const RING_STRENGTH = { 1: 0.25, 2: 0.35 };
 
 const LEGEND = [
   { label: "Person", varName: "--c-person" },
@@ -36,17 +43,26 @@ function radiusFor(node, centerId) {
 // simultaneous image-generation requests. Nodes here only ever show a
 // portrait that's already cached (entity.image_url already on the doc).
 export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
-  const { nodes: rawNodes, links: rawLinks } = useGraphData(entity, neighbors);
+  const [expanded, setExpanded] = useState(false);
+  const { nodes: rawNodes, links: rawLinks } = useGraphData(entity, neighbors, expanded);
   const containerRef = useRef(null);
   const svgRef = useRef(null);
   const onSelectRef = useRef(onSelectEntity);
   onSelectRef.current = onSelectEntity;
+
+  // A fresh entity starts collapsed again — expanding one busy node
+  // shouldn't carry over and instantly tangle the next one you look at.
+  useEffect(() => {
+    setExpanded(false);
+  }, [entity?.id]);
 
   useEffect(() => {
     if (!entity || rawNodes.length === 0 || !svgRef.current || !containerRef.current) return;
 
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 420;
+    const cx = width / 2;
+    const cy = height / 2;
 
     const hopOf = new Map([[entity.id, 0]]);
     for (const { entity: n } of neighbors) hopOf.set(n.id, 1);
@@ -66,6 +82,18 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
       .attr("stroke", (d) => (d.hop === 2 ? "#2c313c" : "#4a5568"))
       .attr("stroke-width", (d) => (d.hop === 2 ? 1 : 1.6));
 
+    // Invisible wide hit-area on top of each thin visible line — makes
+    // hovering to reveal a relationship label actually feasible, a 1.6px
+    // stroke is too thin a target otherwise.
+    const linkHitSel = zoomLayer
+      .append("g")
+      .selectAll("line")
+      .data(links)
+      .join("line")
+      .attr("stroke", "transparent")
+      .attr("stroke-width", 14)
+      .style("cursor", (d) => (d.type ? "help" : "default"));
+
     const linkLabelSel = zoomLayer
       .append("g")
       .selectAll("text")
@@ -74,20 +102,37 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
       .attr("class", "kg-link-label")
       .text((d) => d.type.toLowerCase().replaceAll("_", " "));
 
+    linkHitSel
+      .on("mouseenter", (event, d) => {
+        if (!d.type) return;
+        linkLabelSel.filter((ld) => ld === d).classed("kg-link-label-visible", true);
+      })
+      .on("mouseleave", (event, d) => {
+        if (!d.type) return;
+        linkLabelSel.filter((ld) => ld === d).classed("kg-link-label-visible", false);
+      });
+
     const nodeSel = zoomLayer
       .append("g")
       .selectAll("g")
       .data(nodes, (d) => d.id)
       .join("g")
-      .attr("class", "kg-node")
-      .on("click", (event, d) => onSelectRef.current(d.id));
+      .attr("class", (d) => `kg-node${d.__hop === 2 ? " kg-node-hop2" : ""}`)
+      .on("click", (event, d) => onSelectRef.current(d.id))
+      .on("mouseenter", function () {
+        select(this).classed("kg-node-hovered", true);
+      })
+      .on("mouseleave", function () {
+        select(this).classed("kg-node-hovered", false);
+      });
 
     nodeSel
       .append("circle")
       .attr("r", (d) => radiusFor(d, entity.id))
       .attr("fill", (d) => `var(${colorVarForType(d.entity_type)})`)
       .attr("stroke", (d) => (d.id === entity.id ? "var(--accent)" : "var(--bg-raised)"))
-      .attr("stroke-width", (d) => (d.id === entity.id ? 3 : 2));
+      .attr("stroke-width", (d) => (d.id === entity.id ? 3 : 2))
+      .attr("opacity", (d) => (d.__hop === 2 ? 0.7 : 1));
 
     // Layer a cached portrait on top of the color circle when one already
     // exists — never triggers generation, see the note above the component.
@@ -105,12 +150,13 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
         .attr("height", r * 2)
         .attr("preserveAspectRatio", "xMidYMid slice")
         .attr("clip-path", `url(#${clipId})`)
+        .attr("opacity", d.__hop === 2 ? 0.7 : 1)
         .style("pointer-events", "none");
     });
 
     nodeSel
       .append("text")
-      .attr("class", "kg-node-label")
+      .attr("class", (d) => `kg-node-label${d.__hop === 2 ? " kg-node-label-hop2" : ""}`)
       .attr("y", (d) => radiusFor(d, entity.id) + 12)
       .text((d) => d.canonical_name);
 
@@ -119,18 +165,27 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
         "link",
         forceLink(links)
           .id((d) => d.id)
-          .distance((d) => (d.hop === 2 ? 55 : 95))
-          .strength(0.5)
+          .distance((d) => (d.hop === 2 ? 90 : 130))
+          .strength(0.35)
       )
-      .force("charge", forceManyBody().strength(-220))
-      .force("center", forceCenter(width / 2, height / 2))
+      .force("charge", forceManyBody().strength((d) => (d.__hop === 2 ? -140 : -320)))
+      .force("center", forceCenter(cx, cy))
+      .force(
+        "radial",
+        forceRadial((d) => RING_RADIUS[d.__hop] ?? 0, cx, cy).strength((d) => RING_STRENGTH[d.__hop] ?? 0)
+      )
       .force(
         "collide",
-        forceCollide((d) => radiusFor(d, entity.id) + 16)
+        forceCollide((d) => radiusFor(d, entity.id) + 22)
       );
 
     function render() {
       linkSel
+        .attr("x1", (d) => d.source.x)
+        .attr("y1", (d) => d.source.y)
+        .attr("x2", (d) => d.target.x)
+        .attr("y2", (d) => d.target.y);
+      linkHitSel
         .attr("x1", (d) => d.source.x)
         .attr("y1", (d) => d.source.y)
         .attr("x2", (d) => d.target.x)
@@ -145,7 +200,7 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
     // than animating in from a jumbled starting scatter. The timer
     // (attached right after) keeps running for drag interactions.
     simulation.stop();
-    for (let i = 0; i < 150; i++) simulation.tick();
+    for (let i = 0; i < 200; i++) simulation.tick();
     render();
     simulation.restart();
     simulation.on("tick", render);
@@ -184,6 +239,8 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
     return <div className="empty-note">Select an entity to see its connections graphed here.</div>;
   }
 
+  const canExpand = neighbors.some((n) => (n.entity.neighbor_ids?.length ?? 0) > 0);
+
   return (
     <>
       <div ref={containerRef} className="kg-canvas">
@@ -197,6 +254,11 @@ export default function KnowledgeGraph({ entity, neighbors, onSelectEntity }) {
           </div>
         ))}
       </div>
+      {canExpand && (
+        <button type="button" className="kg-expand-btn" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "− Ocultar 2º salto" : "+ Expandir conexões (2º salto)"}
+        </button>
+      )}
     </>
   );
 }
