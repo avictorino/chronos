@@ -63,7 +63,18 @@ class EntityRepository:
     # civilization (a sibling shard process — see ingestion/scripts/) just
     # created — see app/services/entity_resolution.py for why we can't just
     # trust in-memory-only state instead.
-    _CACHE_TTL_SECONDS = 45.0
+    # 45s was still too short once the collection grew into the hundreds of
+    # docs: the cache cut refresh *frequency*, but each refresh re-scans the
+    # whole (growing) collection, so cost per refresh climbs right along
+    # with it — measured in production continuing to creep back up as
+    # entities/events accumulated. _resolve_name_to_id already checks this
+    # run's in-memory state first (see graph/nodes.py), so most calls never
+    # reach here at all; a much longer TTL mainly trades a few extra minutes
+    # of staleness for seeing a sibling shard process's new entities, which
+    # is a soft nice-to-have (embedding/fuzzy resolution is already a
+    # best-effort safety net, not a guarantee — see entity_resolution.py),
+    # for a large cut in total read volume over a long-running batch.
+    _CACHE_TTL_SECONDS = 600.0
 
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
@@ -156,7 +167,18 @@ class EntityRepository:
 
 
 class EventRepository:
-    _CACHE_TTL_SECONDS = 45.0  # see EntityRepository — same reasoning
+    # 45s was still too short once the collection grew into the hundreds of
+    # docs: the cache cut refresh *frequency*, but each refresh re-scans the
+    # whole (growing) collection, so cost per refresh climbs right along
+    # with it — measured in production continuing to creep back up as
+    # entities/events accumulated. _resolve_name_to_id already checks this
+    # run's in-memory state first (see graph/nodes.py), so most calls never
+    # reach here at all; a much longer TTL mainly trades a few extra minutes
+    # of staleness for seeing a sibling shard process's new entities, which
+    # is a soft nice-to-have (embedding/fuzzy resolution is already a
+    # best-effort safety net, not a guarantee — see entity_resolution.py),
+    # for a large cut in total read volume over a long-running batch.
+    _CACHE_TTL_SECONDS = 600.0  # see EntityRepository — same reasoning
 
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
