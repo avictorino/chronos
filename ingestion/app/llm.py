@@ -188,12 +188,21 @@ def build_civilization_profile_prompt(seed: CivilizationSeed) -> str:
 
 Time range (seed only, not authoritative): {seed.approximate_start_year} to {seed.approximate_end_year}
 
-Identify: canonical name, alternative names, dates, geographic regions, capitals,
+Identify: canonical name, alternative names, geographic regions, capitals,
 important cities, predecessor/successor civilizations, major historical periods,
 major rulers, important people (by name only — they get expanded individually
 later), major event names (by name only — they get expanded individually later),
 religious systems, important deities, languages, important documents, cultural
 developments, technologies, interactions with neighboring civilizations.
+
+IMPORTANT — start_year/end_year: every named civilization has at least an
+approximate span historians agree on. You MUST fill in your own best-estimate
+start_year and end_year (astronomical numbering, negative = BCE, e.g. -3100
+for 3100 BCE) even if the exact boundary is disputed or gradual — use
+date_precision to mark how approximate it is (e.g. "approximate" or
+"disputed"), but do not leave start_year/end_year null just because the exact
+year isn't pinned down. Only leave them null if you truly have no basis at
+all to estimate a span for this civilization.
 
 {_CANDIDATE_KNOWLEDGE_NOTICE}"""
 
@@ -302,12 +311,63 @@ distinct from what's already known.
 {_CANDIDATE_KNOWLEDGE_NOTICE}"""
 
 
-def build_relationship_extraction_prompt(subject_name: str, subject_context: str) -> str:
+def build_polity_discovery_prompt(
+    profile: CivilizationProfile, event_names: list[str], person_names: list[str], max_polities: int
+) -> str:
+    return f"""Given this civilization profile, its major events and people:
+
+Civilization: {profile.canonical_name}
+Predecessor/successor civilizations already named: {profile.predecessor_civilizations + profile.successor_civilizations}
+Major events: {event_names}
+Major people: {person_names}
+
+List up to {max_polities} historically significant political entities (empires,
+kingdoms, dynasties, city-states/polities) associated with this civilization not
+already fully covered above — e.g. the ruling empire itself if distinct from the
+civilization as a whole, dynasties that ruled it, vassal or rival kingdoms it
+interacted with. For each, give only a name and a one-sentence description — they
+get expanded individually later.
+
+{_CANDIDATE_KNOWLEDGE_NOTICE}"""
+
+
+def build_polity_expansion_prompt(candidate_name: str, context: str) -> str:
+    return f"""Expand this historical polity candidate into full detail:
+
+Name: {candidate_name}
+Civilization context: {context}
+
+Provide: canonical name, aliases (variant spellings/transliterations), a
+summary, and whether it is best classified as a POLITY/EMPIRE/KINGDOM/DYNASTY.
+
+IMPORTANT — start_year/end_year: give your own best-estimate start_year and
+end_year for the period this polity actually existed/ruled (astronomical
+numbering, negative = BCE, e.g. -860 for 860 BCE). Most named empires/
+kingdoms/dynasties have at least an approximate span historians agree on —
+use your own historical knowledge to estimate one even if the exact boundary
+is disputed or gradual. Only leave start_year/end_year null if you truly have
+no basis at all to guess, which should be rare.
+
+Also list, by name only (they get expanded individually later, do not describe
+them here): `notable_rulers` — its most significant rulers — `notable_events`
+— historical events centrally tied to this polity beyond what's already
+implied by the civilization context above — and `notable_people` — other
+people significantly associated with it. Leave any list empty rather than
+inventing entries; only include names you're reasonably confident are real and
+distinct from what's already known.
+
+{_CANDIDATE_KNOWLEDGE_NOTICE}"""
+
+
+def build_relationship_extraction_prompt(
+    subject_name: str, subject_context: str, subject_dates: str | None = None
+) -> str:
+    dates_line = f"Known timeframe: {subject_dates}\n" if subject_dates else ""
     return f"""Given this historical subject:
 
 {subject_name}
 Context: {subject_context}
-
+{dates_line}
 Extract relationships between this subject and other entities/events already
 mentioned in its context, using ONLY these relationship types: KING_OF, RULED,
 MEMBER_OF_DYNASTY, FATHER_OF, MOTHER_OF, CHILD_OF, MARRIED_TO, ALLY_OF, ENEMY_OF,
@@ -315,6 +375,12 @@ CONQUERED, ATTACKED, BESIEGED, DEFEATED, PARTICIPATED_IN, COMMANDER_IN, FOUNDED,
 DESTROYED, LOCATED_IN, OCCURRED_AT, PRECEDED_BY, SUCCEEDED_BY, CONTEMPORARY_OF,
 MENTIONED_IN, DESCRIBED_BY, INFLUENCED, RELATED_TO. Refer to the other side of
 each relationship by name (source_name/target_name), not by id.
+
+When a relationship has its own timeframe (e.g. KING_OF, RULED, CONQUERED,
+ALLY_OF, ENEMY_OF), populate start_year/end_year with your best estimate, and
+keep it chronologically consistent with the subject's known timeframe above —
+do not invent a relationship that would require the subject and the other side
+to be contemporaries when their known dates make that impossible.
 
 {_CANDIDATE_KNOWLEDGE_NOTICE}"""
 

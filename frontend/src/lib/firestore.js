@@ -1,8 +1,7 @@
-// Read-only data access over the Firestore mirror exported from Postgres by
-// `ingestion/app/export/firestore_export.py`. Every function here is a plain
-// read — nothing in the frontend ever writes to Firestore (see the root
-// README's "Firestore export" section and the security rules: public read,
-// admin-only write).
+// Read-only data access over the knowledge graph written directly by
+// `ingestion/app/persistence/repositories.py`. Every function here is a
+// plain read — nothing in the frontend ever writes to Firestore (see the
+// root README and the security rules: public read, admin-only write).
 
 import {
   collection,

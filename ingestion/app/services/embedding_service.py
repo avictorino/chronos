@@ -1,22 +1,18 @@
 """Batch-embeds chunks and persists them. Split out of
 `graph/nodes.py::generate_embeddings` for the same reason as event_service.py.
+
+No dimension pre-sizing needed here (unlike the old pgvector column, which
+had to be `ALTER`ed to a fixed `vector(n)` once the embedding dimension was
+known) — Firestore's native vector field doesn't require a declared size.
 """
 
 from __future__ import annotations
 
 from app.domain.models import IngestionError, KnowledgeChunk
 from app.graph.state import GraphDeps
-from app.persistence.vector import ensure_vector_ready, get_or_detect_dimension
 from app.utils.logging import get_logger
 
 log = get_logger("embedding")
-
-
-async def ensure_index_ready(deps: GraphDeps) -> int:
-    dimension = await get_or_detect_dimension(deps.settings, deps.embedding_client)
-    if not deps.dry_run and deps.conn is not None:
-        await ensure_vector_ready(deps.conn, dimension)
-    return dimension
 
 
 async def embed_and_persist_chunks(

@@ -22,6 +22,9 @@ from app.domain.schemas import (
     PlaceCandidate,
     PlaceCandidateList,
     PlaceProfile,
+    PolityCandidate,
+    PolityCandidateList,
+    PolityProfile,
     RelationshipCandidate,
     RelationshipCandidateList,
 )
@@ -42,6 +45,7 @@ def _settings(**overrides: object) -> Settings:
         "max_events_per_civilization": 2,
         "max_people_per_civilization": 5,
         "max_places_per_civilization": 5,
+        "max_polities_per_civilization": 5,
         "llm_concurrency": 1,
         "entity_resolution_use_llm": False,
     }
@@ -121,7 +125,22 @@ async def test_full_graph_with_fake_llm(sample_civilization_seed):
         PlaceProfile(canonical_name="Eridu", summary="One of the oldest cities of Sumer.", place_kind=EntityType.CITY),
     )
 
-    # extract_relationships: 4 subjects in order [event1, event2, person1, place1]
+    llm.queue(
+        PolityCandidateList,
+        PolityCandidateList(items=[PolityCandidate(name="Akkadian Empire", short_description="A Mesopotamian empire.")]),
+    )
+    llm.queue(
+        PolityProfile,
+        PolityProfile(
+            canonical_name="Akkadian Empire",
+            summary="A Mesopotamian empire that unified Sumerian and Akkadian city-states.",
+            entity_type=EntityType.EMPIRE,
+            start_year=-2334,
+            end_year=-2154,
+        ),
+    )
+
+    # extract_relationships: 5 subjects in order [event1, event2, person1, place1, polity1]
     llm.queue(
         RelationshipCandidateList,
         RelationshipCandidateList(
@@ -135,10 +154,10 @@ async def test_full_graph_with_fake_llm(sample_civilization_seed):
             ]
         ),
     )
-    for _ in range(3):
+    for _ in range(4):
         llm.queue(RelationshipCandidateList, RelationshipCandidateList(items=[]))
 
-    # generate_claims: same 4 subjects
+    # generate_claims: same 5 subjects
     llm.queue(
         ClaimCandidateList,
         ClaimCandidateList(
@@ -152,11 +171,11 @@ async def test_full_graph_with_fake_llm(sample_civilization_seed):
             ]
         ),
     )
-    for _ in range(3):
+    for _ in range(4):
         llm.queue(ClaimCandidateList, ClaimCandidateList(items=[]))
 
-    # generate_chunks: 5 subjects [civilization, event1, event2, person1, place1]
-    for _ in range(5):
+    # generate_chunks: 6 subjects [civilization, event1, event2, person1, place1, polity1]
+    for _ in range(6):
         llm.queue(
             ChunkDraftList,
             ChunkDraftList(items=[ChunkDraft(chunk_type="civilization_overview", text="Some chunk text.")]),
@@ -189,11 +208,12 @@ async def test_full_graph_with_fake_llm(sample_civilization_seed):
     final_state = await graph.ainvoke(_initial_state(sample_civilization_seed), config=_config(deps, "test-1"))
 
     assert len(final_state["events"]) == 2  # MAX_EVENTS_PER_CIVILIZATION respected
-    assert len(final_state["entities"]) == 3  # civilization + person + place
+    assert len(final_state["entities"]) == 4  # civilization + person + place + polity
     for key in (
         "pending_events",
         "pending_people",
         "pending_places",
+        "pending_polities",
         "pending_relationship_subjects",
         "pending_claim_subjects",
         "pending_chunk_subjects",
@@ -202,16 +222,21 @@ async def test_full_graph_with_fake_llm(sample_civilization_seed):
         assert final_state[key] == []
     assert len(final_state["relationships"]) == 1
     assert len(final_state["claims"]) == 1
-    assert len(final_state["chunks"]) == 5
+    assert len(final_state["chunks"]) == 6
     assert all(c["embedding"] for c in final_state["chunks"].values())
     assert final_state["errors"] == []
 
+    # the polity picked up real dates from the LLM (B2 — no longer stub-only)
+    polity = next(e for e in final_state["entities"].values() if e["entity_type"] == "EMPIRE")
+    assert polity["start_year"] == -2334
+    assert polity["end_year"] == -2154
+
     # persisted through the repositories, not just present in graph state
-    assert len(entity_repo.by_id) == 3
+    assert len(entity_repo.by_id) == 4
     assert len(event_repo.by_id) == 2
     assert len(relationship_repo.by_id) == 1
     assert len(claim_repo.by_id) == 1
-    assert len(chunk_repo.by_id) == 5
+    assert len(chunk_repo.by_id) == 6
     assert len(run_repo.by_id) == 1
 
 
@@ -246,6 +271,7 @@ async def test_item_error_does_not_abort_run(sample_civilization_seed):
 
     llm.queue(PersonCandidateList, PersonCandidateList(items=[]))
     llm.queue(PlaceCandidateList, PlaceCandidateList(items=[]))
+    llm.queue(PolityCandidateList, PolityCandidateList(items=[]))
 
     llm.queue(RelationshipCandidateList, RelationshipCandidateList(items=[]))  # subject: Event One
     llm.queue(ClaimCandidateList, ClaimCandidateList(items=[]))  # subject: Event One
@@ -278,84 +304,42 @@ async def test_item_error_does_not_abort_run(sample_civilization_seed):
     assert final_state["errors"][0]["item"] == "Event Two"
 
 
-def _require_postgres_dsn() -> None:
-    if not os.environ.get("POSTGRES_DSN"):
-        pytest.skip("POSTGRES_DSN not set — skipping integration test")
+def _require_firestore_emulator() -> None:
+    if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        pytest.skip("FIRESTORE_EMULATOR_HOST not set — skipping integration test")
 
 
 @pytest.mark.integration
 async def test_entity_upsert_is_idempotent():
-    """Requires a real Postgres (POSTGRES_DSN) — inserting the same entity
-    twice must not create a second row. Skipped automatically otherwise."""
-    _require_postgres_dsn()
+    """Requires a local Firestore emulator (FIRESTORE_EMULATOR_HOST) —
+    upserting the same entity twice must not create a duplicate document, and
+    the merge=True write must not clobber source_civilizations. Skipped
+    automatically otherwise."""
+    _require_firestore_emulator()
 
     from app.domain.models import Person
-    from app.persistence.postgres import PostgresConnection
+    from app.persistence.firestore import FirestoreConnection
     from app.persistence.repositories import EntityRepository
-    from app.persistence.schema import ensure_schema
     from app.utils.ids import stable_entity_id
 
-    settings = Settings()
-    conn = PostgresConnection(settings)
-    await conn.verify_connectivity()
-    await ensure_schema(conn)
+    settings = Settings(firebase_project_id="chronos-test")
+    conn = FirestoreConnection(settings)
+    await conn.connect()
     repo = EntityRepository(conn)
 
-    person = Person(id=stable_entity_id(EntityType.PERSON, "Test Idempotency Person"), canonical_name="Test Idempotency Person")
+    person = Person(
+        id=stable_entity_id(EntityType.PERSON, "Test Idempotency Person"),
+        canonical_name="Test Idempotency Person",
+        source_civilizations=["test_civ"],
+    )
     try:
         await repo.upsert(person)
         await repo.upsert(person)
-        row = await conn.fetchrow("SELECT count(*) AS c FROM entities WHERE id = $1", person.id)
-        assert row["c"] == 1
+        doc = await conn.db.collection("entities").document(person.id).get()
+        assert doc.exists
+        data = doc.to_dict()
+        assert data["canonical_name"] == "Test Idempotency Person"
+        assert data["source_civilizations"] == ["test_civ"]
     finally:
-        await conn.execute("DELETE FROM entities WHERE id = $1", person.id)
-        await conn.close()
-
-
-@pytest.mark.integration
-async def test_relationship_traversal_with_recursive_cte():
-    """Requires a real Postgres (POSTGRES_DSN). Builds a tiny chain
-    A-[:ALLY_OF]->B-[:ALLY_OF]->C and confirms RelationshipRepository's
-    WITH RECURSIVE traversal finds C from A within 2 hops but not within 1."""
-    _require_postgres_dsn()
-
-    from app.domain.enums import RelationshipType
-    from app.domain.models import HistoricalRelationship
-    from app.persistence.postgres import PostgresConnection
-    from app.persistence.repositories import RelationshipRepository
-    from app.persistence.schema import ensure_schema
-    from app.utils.ids import stable_relationship_id
-
-    settings = Settings()
-    conn = PostgresConnection(settings)
-    await conn.verify_connectivity()
-    await ensure_schema(conn)
-    repo = RelationshipRepository(conn)
-
-    a, b, c = "test_traverse_a", "test_traverse_b", "test_traverse_c"
-    rel_ab = HistoricalRelationship(
-        id=stable_relationship_id(a, "ALLY_OF", b),
-        source_entity_id=a,
-        target_entity_id=b,
-        relationship_type=RelationshipType.ALLY_OF,
-        confidence=0.9,
-    )
-    rel_bc = HistoricalRelationship(
-        id=stable_relationship_id(b, "ALLY_OF", c),
-        source_entity_id=b,
-        target_entity_id=c,
-        relationship_type=RelationshipType.ALLY_OF,
-        confidence=0.9,
-    )
-    try:
-        await repo.upsert(rel_ab)
-        await repo.upsert(rel_bc)
-
-        one_hop = await repo.find_connected(a, max_hops=1)
-        two_hops = await repo.find_connected(a, max_hops=2)
-
-        assert {row["id"] for row in one_hop} == {b}
-        assert {row["id"] for row in two_hops} == {b, c}
-    finally:
-        await conn.execute("DELETE FROM relationships WHERE id = ANY($1)", [rel_ab.id, rel_bc.id])
+        await conn.db.collection("entities").document(person.id).delete()
         await conn.close()

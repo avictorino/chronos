@@ -3,7 +3,6 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,29 +24,16 @@ class Settings(BaseSettings):
     # iteration (asyncio.gather, not OS threads — see spec/03-architecture-spec.md).
     llm_concurrency: int = 1
 
-    # --- Postgres + pgvector ---
-    postgres_dsn: str = "postgresql://postgres:postgres@localhost:5432/chronos"
-
-    # --- Firestore export (see app/export/firestore_export.py) ---
-    # Postgres stays the source of truth; this is only used by the
-    # `export-firestore` CLI command to mirror the graph into Firestore for
-    # the frontend to read directly (free Spark plan, no server in between).
+    # --- Firestore (the only datastore — see app/persistence/firestore.py) ---
+    # The pipeline used to persist to Postgres and mirror into Firestore via a
+    # separate `export-firestore` step; it now writes directly to Firestore,
+    # so these are required for `ingest` to persist anything (dry-run works
+    # without them — see app/services/ingestion_service.py::_build_deps).
     firebase_project_id: str | None = None
     # Path to a service-account JSON key (Admin SDK). Leave unset to fall back
     # to ambient Application Default Credentials (e.g. `gcloud auth
     # application-default login`) instead.
     google_application_credentials: str | None = None
-
-    # Vector index dimension override. None => auto-detect from the embedding
-    # model at first use (see app/persistence/vector.py).
-    embedding_dimensions: int | None = None
-
-    @field_validator("embedding_dimensions", mode="before")
-    @classmethod
-    def _blank_env_var_means_none(cls, value: object) -> object:
-        # An unset .env value (EMBEDDING_DIMENSIONS=) arrives as "", which
-        # int-parsing would reject — treat it the same as leaving it unset.
-        return None if value == "" else value
 
     # --- Ingestion limits ---
     # Per-civilization budgets, counted across *both* the initial discovery
@@ -56,6 +42,7 @@ class Settings(BaseSettings):
     max_events_per_civilization: int = 100
     max_people_per_civilization: int = 200
     max_places_per_civilization: int = 200
+    max_polities_per_civilization: int = 20
     max_relationships_per_entity: int = 30
     # Hop count from the civilization root: an event/person/place discovered by
     # expanding something at depth d can recursively queue new candidates at

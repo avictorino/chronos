@@ -1,10 +1,10 @@
 rules_version = '2';
 
-// Public read, no client write — the only writer is the export script's
-// Admin SDK (ingestion/app/export/firestore_export.py), which authenticates
-// with a service-account key and bypasses these rules entirely. Everything
-// here is a read-only mirror of Postgres; nothing should ever be written
-// from the frontend. See the root README's "Firestore export" section.
+// Public read, no client write — the only writer is the ingestion pipeline's
+// Admin SDK (ingestion/app/persistence/repositories.py), which authenticates
+// with a service-account key and bypasses these rules entirely (plus the
+// on-demand image-generation Cloud Function, for image_* fields only).
+// Nothing should ever be written from the frontend. See the root README.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {

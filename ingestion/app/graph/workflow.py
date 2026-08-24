@@ -29,6 +29,8 @@ def build_workflow(checkpointer=None):
     graph.add_node("expand_people", nodes.expand_people)
     graph.add_node("discover_places", nodes.discover_places)
     graph.add_node("expand_places", nodes.expand_places)
+    graph.add_node("discover_polities", nodes.discover_polities)
+    graph.add_node("expand_polities", nodes.expand_polities)
     graph.add_node("extract_relationships", nodes.extract_relationships)
     graph.add_node("generate_claims", nodes.generate_claims)
     graph.add_node("entity_resolution", nodes.entity_resolution)
@@ -41,15 +43,16 @@ def build_workflow(checkpointer=None):
     graph.add_edge("extract_civilization_profile", "persist_civilization")
     graph.add_edge("persist_civilization", "discover_events")
     graph.add_edge("discover_events", "expand_events")
-    # discover_people / discover_places / expand_events / expand_people /
-    # expand_places / extract_relationships / generate_claims all route
-    # themselves dynamically via Command(goto=...) — expand_*/extract_*/
-    # generate_claims self-loop while their own pending list has items;
-    # discover_people/discover_places and the "queue drained" branch of every
-    # expand_* node instead call `_route_after_stage`, which is what lets a
-    # person/place discovered mid-pipeline recursively re-queue new events —
-    # looping back across stage boundaries, not just within one node. None of
-    # them have a static outgoing add_edge.
+    # discover_people / discover_places / discover_polities / expand_events /
+    # expand_people / expand_places / expand_polities / extract_relationships /
+    # generate_claims all route themselves dynamically via Command(goto=...) —
+    # expand_*/extract_*/generate_claims self-loop while their own pending
+    # list has items; discover_people/discover_places/discover_polities and
+    # the "queue drained" branch of every expand_* node instead call
+    # `_route_after_stage`, which is what lets a person/place/polity
+    # discovered mid-pipeline recursively re-queue new events — looping back
+    # across stage boundaries, not just within one node. None of them have a
+    # static outgoing add_edge.
     graph.add_edge("entity_resolution", "generate_chunks")
     graph.add_edge("generate_chunks", "generate_embeddings")
     graph.add_edge("generate_embeddings", "persist_graph")

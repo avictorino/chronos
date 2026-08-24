@@ -4,11 +4,11 @@
 // ship in client-side code — it identifies the project, it isn't a secret;
 // the real access control lives in Firestore's security rules, not here).
 //
-// Firestore holds a read-only mirror of the knowledge graph exported from
-// Postgres by `ingestion/app/export/firestore_export.py` — this app reads it
+// Firestore holds the knowledge graph written directly by the ingestion
+// pipeline (`ingestion/app/persistence/repositories.py`) — this app reads it
 // directly (graph navigation + vector similarity search), no backend server
-// in between. See the root README and the ingestion export module for the
-// full design.
+// in between. See the root README and `ingestion/README.md` for the full
+// design.
 
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported as isAnalyticsSupported } from "firebase/analytics";

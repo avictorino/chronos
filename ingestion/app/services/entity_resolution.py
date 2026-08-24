@@ -3,7 +3,7 @@ embedding similarity -> optional LLM tiebreaker. See spec/02-domain-model-spec.m
 
 Deliberately simple: not implementing anything more elaborate than this for V1.
 `resolve_entity` always compares against candidates already fetched from
-Postgres (via EntityRepository/EventRepository.find_candidates) — resolving only
+Firestore (via EntityRepository/EventRepository.find_candidates) — resolving only
 against the current run's in-memory state would silently break cross-
 civilization dedup (e.g. Judah/Babylon mentioned by Assyria in a later run).
 """

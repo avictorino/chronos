@@ -1,14 +1,13 @@
 [project]
 name = "chronos-ingestion"
 version = "0.1.0"
-description = "LLM-driven ingestion pipeline that builds a historical knowledge graph in Postgres + pgvector."
+description = "LLM-driven ingestion pipeline that builds a historical knowledge graph directly in Firestore."
 requires-python = ">=3.12"
 dependencies = [
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=3.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
-    "asyncpg>=0.30",
     "ollama>=0.6",
     "openai>=1.50",
     "tenacity>=9.0",
@@ -29,5 +28,5 @@ package = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
-    "integration: requires a real Postgres instance (set POSTGRES_DSN to enable; skipped otherwise)",
+    "integration: requires a local Firestore emulator (set FIRESTORE_EMULATOR_HOST to enable; skipped otherwise)",
 ]

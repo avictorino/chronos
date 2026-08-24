@@ -1,6 +1,16 @@
-# 04 — Postgres Schema Spec
+# 04 — Postgres Schema Spec (histórico — superado)
 
-> Revisão: a spec original desenhava isso para Neo4j. O projeto migrou para **Postgres + pgvector** (instância local do usuário), usando `WITH RECURSIVE` para travessia multi-hop em vez de Cypher nativo. Esta é a versão vigente.
+> **Superado**: o Postgres descrito aqui foi removido. A ingestão persiste diretamente no
+> Firestore agora (`app/persistence/firestore.py` + `app/persistence/repositories.py`) —
+> sem etapa intermediária nem `export-firestore`. Cada tabela abaixo virou uma collection
+> Firestore de mesmo nome; a coluna `data JSONB` é o próprio documento; `neighbor_ids`
+> (antes calculado em `firestore_export.py` como pós-processamento) é mantido
+> incrementalmente via `ArrayUnion` a cada relationship gravada; `WITH RECURSIVE` não tem
+> equivalente Firestore e foi removido (nunca esteve ligado ao pipeline de ingestão — só
+> ao futuro recurso de exploração cross-civilização). Este documento fica como registro
+> histórico do desenho anterior.
+>
+> Revisão anterior: a spec original desenhava isso para Neo4j. O projeto migrou para **Postgres + pgvector** (instância local do usuário), usando `WITH RECURSIVE` para travessia multi-hop em vez de Cypher nativo.
 
 ## Por que Postgres em vez de um grafo nativo
 

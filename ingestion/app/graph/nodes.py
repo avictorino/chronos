@@ -69,6 +69,9 @@ from app.domain.schemas import (
     PlaceCandidate,
     PlaceCandidateList,
     PlaceProfile,
+    PolityCandidate,
+    PolityCandidateList,
+    PolityProfile,
     RelationshipCandidateList,
 )
 from app.graph.state import GraphDeps, IngestionState
@@ -83,9 +86,11 @@ from app.llm import (
     build_person_expansion_prompt,
     build_place_discovery_prompt,
     build_place_expansion_prompt,
+    build_polity_discovery_prompt,
+    build_polity_expansion_prompt,
     build_relationship_extraction_prompt,
 )
-from app.services.embedding_service import ensure_index_ready, embed_and_persist_chunks
+from app.services.embedding_service import embed_and_persist_chunks
 from app.services.entity_resolution import resolve_entity
 from app.services.event_service import resolve_and_persist_event
 from app.utils.ids import (
@@ -130,6 +135,54 @@ def _log_resolution_merge(candidate_name: str, resolution) -> None:  # noqa: ANN
         confidence=round(resolution.confidence, 2),
         reason=resolution.reason,
     )
+
+
+# --- subject "dates" hints, threaded into build_relationship_extraction_prompt --
+#
+# Short best-effort strings summarizing what's already known about a
+# subject's own timeframe, so relationship extraction (see
+# extract_relationships below) can ground any start_year/end_year it invents
+# instead of guessing blind — see spec/06, "relationship coherence".
+
+
+def _timeframe_hint(start_year: int | None, end_year: int | None) -> str | None:
+    if start_year is None and end_year is None:
+        return None
+    span = f"{start_year} to {end_year}" if start_year is not None and end_year is not None else str(
+        start_year if start_year is not None else end_year
+    )
+    return f"known timeframe: {span}"
+
+
+def _historical_date_year(date) -> str | None:  # HistoricalDate | None
+    if date is None:
+        return None
+    if date.estimated_year is not None:
+        return str(date.estimated_year)
+    if date.earliest_year is not None and date.latest_year is not None:
+        return f"{date.earliest_year} to {date.latest_year}"
+    if date.earliest_year is not None:
+        return str(date.earliest_year)
+    if date.latest_year is not None:
+        return str(date.latest_year)
+    return None
+
+
+def _person_dates_hint(birth_date, death_date) -> str | None:  # HistoricalDate | None each
+    born = _historical_date_year(birth_date)
+    died = _historical_date_year(death_date)
+    if born and died:
+        return f"born {born}, died {died}"
+    if born:
+        return f"born {born}"
+    if died:
+        return f"died {died}"
+    return None
+
+
+def _event_dates_hint(date) -> str | None:  # HistoricalDate
+    year = _historical_date_year(date)
+    return f"occurred {year}" if year else None
 
 
 # --- recursive expansion helpers ------------------------------------------------
@@ -200,13 +253,13 @@ def _enqueue_mentions(
 
 
 def _route_after_stage(state: IngestionState) -> str:
-    """Shared 'what's next' decision for the events/people/places expansion
-    loop. discover_people/discover_places each run their one-shot LLM
-    discovery call exactly once (guarded by their *_discovery_done flag);
-    after that, this keeps revisiting whichever stage has recursively-queued
-    work — in events -> people -> places order — until every queue is
-    simultaneously empty, at which point the pipeline moves on to
-    extract_relationships."""
+    """Shared 'what's next' decision for the events/people/places/polities
+    expansion loop. discover_people/discover_places/discover_polities each
+    run their one-shot LLM discovery call exactly once (guarded by their
+    *_discovery_done flag); after that, this keeps revisiting whichever stage
+    has recursively-queued work — in events -> people -> places -> polities
+    order — until every queue is simultaneously empty, at which point the
+    pipeline moves on to extract_relationships."""
     if state["pending_events"]:
         return "expand_events"
     if not state["people_discovery_done"]:
@@ -217,6 +270,10 @@ def _route_after_stage(state: IngestionState) -> str:
         return "discover_places"
     if state["pending_places"]:
         return "expand_places"
+    if not state["polities_discovery_done"]:
+        return "discover_polities"
+    if state["pending_polities"]:
+        return "expand_polities"
     return "extract_relationships"
 
 
@@ -251,10 +308,11 @@ async def persist_civilization(state: IngestionState, config: RunnableConfig) ->
         end_year=profile.end_year,
         generated_by_model=deps.model_name,
         ingestion_run_id=deps.run_id,
+        source_civilizations=[state["civilization_id"]],
     )
     if not deps.dry_run:
         await deps.entity_repo.upsert(civilization)
-        log.info("POSTGRES", "Civilization persisted", name=civilization.canonical_name)
+        log.info("FIRESTORE", "Civilization persisted", name=civilization.canonical_name)
     else:
         log.info("LLM", "Civilization profile extracted (dry-run, not persisted)", name=civilization.canonical_name)
 
@@ -263,6 +321,7 @@ async def persist_civilization(state: IngestionState, config: RunnableConfig) ->
         "name": civilization.canonical_name,
         "kind": "civilization",
         "context": civilization.summary or "",
+        "dates": _timeframe_hint(civilization.start_year, civilization.end_year),
     }
     return {
         "entities": {**state["entities"], civilization.id: civilization.model_dump(mode="json")},
@@ -331,6 +390,30 @@ async def discover_places(state: IngestionState, config: RunnableConfig) -> Comm
     return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
+async def discover_polities(state: IngestionState, config: RunnableConfig) -> Command:
+    deps = _deps(config)
+    profile = CivilizationProfile.model_validate(state["profile"])
+    event_names = [e["name"] for e in state["events"].values()]
+    person_names = [
+        e["canonical_name"] for e in state["entities"].values() if e.get("entity_type") == "PERSON"
+    ]
+
+    pending = list(state["pending_polities"])
+    remaining_budget = max(0, deps.settings.max_polities_per_civilization - len(pending))
+    if remaining_budget > 0:
+        log.info("LLM", "Discovering polities", civilization=profile.canonical_name)
+        prompt = build_polity_discovery_prompt(profile, event_names, person_names, remaining_budget)
+        result = await deps.llm_client.generate_structured(prompt, PolityCandidateList)
+        for c in result.items[:remaining_budget]:
+            if _name_known(c.name, state["entities"], state["events"]) or _name_pending(c.name, pending):
+                continue
+            pending.append({**c.model_dump(mode="json"), "_depth": 0})
+    log.info("LLM", f"{len(pending)} candidate polities queued total (incl. recursively discovered)")
+
+    update = {"pending_polities": pending, "processed_polities": [], "polities_discovery_done": True}
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
+
+
 # --- self-looping expansion nodes -----------------------------------------------
 
 
@@ -366,10 +449,16 @@ async def expand_events(state: IngestionState, config: RunnableConfig) -> Comman
             continue
         try:
             log.info("EVENT", f"Processing {candidate.name}")
-            event = await resolve_and_persist_event(result, deps)
+            event = await resolve_and_persist_event(result, deps, state["civilization_id"])
             events[event.id] = event.model_dump(mode="json")
             processed.append(event.id)
-            subject = {"id": event.id, "name": event.name, "kind": "event", "context": event.description}
+            subject = {
+                "id": event.id,
+                "name": event.name,
+                "kind": "event",
+                "context": event.description,
+                "dates": _event_dates_hint(event.date),
+            }
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
             chunk_subjects.append(subject)
@@ -469,6 +558,7 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
                 confidence=result.confidence,
                 generated_by_model=deps.model_name,
                 ingestion_run_id=deps.run_id,
+                source_civilizations=[state["civilization_id"]],
             )
             if not deps.dry_run:
                 await deps.entity_repo.upsert(person)
@@ -479,6 +569,7 @@ async def expand_people(state: IngestionState, config: RunnableConfig) -> Comman
                 "name": person.canonical_name,
                 "kind": "person",
                 "context": person.summary or "",
+                "dates": _person_dates_hint(person.birth_date, person.death_date),
             }
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
@@ -582,6 +673,7 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
                 confidence=result.confidence,
                 generated_by_model=deps.model_name,
                 ingestion_run_id=deps.run_id,
+                source_civilizations=[state["civilization_id"]],
             )
             if not deps.dry_run:
                 await deps.entity_repo.upsert(place)
@@ -592,6 +684,7 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
                 "name": place.canonical_name,
                 "kind": "place",
                 "context": place.summary or "",
+                "dates": None,
             }
             relationship_subjects.append(subject)
             claim_subjects.append(subject)
@@ -636,6 +729,118 @@ async def expand_places(state: IngestionState, config: RunnableConfig) -> Comman
     return Command(update=update, goto=_route_after_stage({**state, **update}))
 
 
+async def expand_polities(state: IngestionState, config: RunnableConfig) -> Command:
+    deps = _deps(config)
+    pending = state["pending_polities"]
+    if not pending:
+        return Command(goto=_route_after_stage(state))
+
+    profile = CivilizationProfile.model_validate(state["profile"])
+
+    async def call(candidate_dict: dict) -> PolityProfile:
+        candidate = PolityCandidate.model_validate(candidate_dict)
+        prompt = build_polity_expansion_prompt(candidate.name, profile.canonical_name)
+        return await deps.llm_client.generate_structured(prompt, PolityProfile)
+
+    batch, rest = await _gather_batch(pending, deps.settings.llm_concurrency, call)
+
+    entities = dict(state["entities"])
+    events = dict(state["events"])
+    processed = list(state["processed_polities"])
+    errors = list(state["errors"])
+    relationship_subjects = list(state["pending_relationship_subjects"])
+    claim_subjects = list(state["pending_claim_subjects"])
+    chunk_subjects = list(state["pending_chunk_subjects"])
+    new_pending_events = list(state["pending_events"])
+    new_pending_people = list(state["pending_people"])
+
+    for candidate_dict, result in batch:
+        candidate = PolityCandidate.model_validate(candidate_dict)
+        if isinstance(result, BaseException):
+            errors.append(_error("expand_polities", candidate.name, result))
+            continue
+        try:
+            log.info("ENTITY", f"Resolving {result.canonical_name}")
+            existing = await deps.entity_repo.find_candidates(result.entity_type)
+            resolution = await resolve_entity(
+                result.canonical_name,
+                result.aliases,
+                existing,
+                deps.embedding_client,
+                deps.llm_client,
+                deps.settings.entity_resolution_use_llm,
+            )
+            polity_id = stable_entity_id(result.entity_type, result.canonical_name)
+            if resolution.action == "merge" and resolution.existing_entity_id:
+                polity_id = resolution.existing_entity_id
+                _log_resolution_merge(result.canonical_name, resolution)
+            polity = Polity(
+                id=polity_id,
+                entity_type=result.entity_type,
+                canonical_name=result.canonical_name,
+                aliases=result.aliases,
+                summary=result.summary,
+                start_year=result.start_year,
+                end_year=result.end_year,
+                confidence=result.confidence,
+                generated_by_model=deps.model_name,
+                ingestion_run_id=deps.run_id,
+                source_civilizations=[state["civilization_id"]],
+            )
+            if not deps.dry_run:
+                await deps.entity_repo.upsert(polity)
+            entities[polity.id] = polity.model_dump(mode="json")
+            processed.append(polity.id)
+            subject = {
+                "id": polity.id,
+                "name": polity.canonical_name,
+                "kind": "polity",
+                "context": polity.summary or "",
+                "dates": _timeframe_hint(polity.start_year, polity.end_year),
+            }
+            relationship_subjects.append(subject)
+            claim_subjects.append(subject)
+            chunk_subjects.append(subject)
+
+            depth = candidate_dict.get("_depth", 0) + 1
+            mention_note = f"Mentioned in connection with {polity.canonical_name}; discovered via recursive expansion."
+            _enqueue_mentions(
+                result.notable_events,
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_events_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_events,
+                extra_fields={"event_type": EventType.GENERIC.value, "short_description": mention_note},
+            )
+            _enqueue_mentions(
+                [*result.notable_rulers, *result.notable_people],
+                depth=depth,
+                max_depth=deps.settings.max_expansion_depth,
+                budget=deps.settings.max_people_per_civilization,
+                entities=entities,
+                events=events,
+                pending=new_pending_people,
+                extra_fields={"short_description": mention_note},
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(_error("expand_polities", candidate.name, exc))
+
+    update = {
+        "entities": entities,
+        "processed_polities": processed,
+        "pending_polities": rest,
+        "errors": errors,
+        "pending_relationship_subjects": relationship_subjects,
+        "pending_claim_subjects": claim_subjects,
+        "pending_chunk_subjects": chunk_subjects,
+        "pending_events": new_pending_events,
+        "pending_people": new_pending_people,
+    }
+    return Command(update=update, goto=_route_after_stage({**state, **update}))
+
+
 # --- name resolution shared by extract_relationships/generate_claims -----------
 
 _NAME_RESOLUTION_TYPES = [
@@ -650,7 +855,7 @@ _NAME_RESOLUTION_TYPES = [
 async def _resolve_name_to_id(name: str, state: IngestionState, deps: GraphDeps) -> str | None:
     """Resolves a bare name (as mentioned in a relationship/claim) to an
     already-known entity/event id. Checks this run's in-memory state first
-    (cheap), then falls back to Postgres across the likely entity types plus
+    (cheap), then falls back to Firestore across the likely entity types plus
     events. Returns None if nothing sufficiently similar is found — the
     caller queues the name for the final `entity_resolution` stub sweep."""
     needle = name.strip().lower()
@@ -692,7 +897,7 @@ async def extract_relationships(state: IngestionState, config: RunnableConfig) -
         return Command(goto="generate_claims")
 
     async def call(subject: dict) -> RelationshipCandidateList:
-        prompt = build_relationship_extraction_prompt(subject["name"], subject["context"])
+        prompt = build_relationship_extraction_prompt(subject["name"], subject["context"], subject.get("dates"))
         return await deps.llm_client.generate_structured(prompt, RelationshipCandidateList)
 
     batch, rest = await _gather_batch(pending, deps.settings.llm_concurrency, call)
@@ -726,6 +931,7 @@ async def extract_relationships(state: IngestionState, config: RunnableConfig) -
                     confidence=candidate.confidence,
                     generated_by_model=deps.model_name,
                     ingestion_run_id=deps.run_id,
+                    source_civilizations=[state["civilization_id"]],
                 )
                 if not deps.dry_run:
                     await deps.relationship_repo.upsert(rel)
@@ -779,6 +985,7 @@ async def generate_claims(state: IngestionState, config: RunnableConfig) -> Comm
                     confidence=candidate.confidence,
                     generated_by_model=deps.model_name,
                     ingestion_run_id=deps.run_id,
+                    source_civilizations=[state["civilization_id"]],
                 )
                 if not deps.dry_run:
                     await deps.claim_repo.upsert(claim)
@@ -823,7 +1030,7 @@ _STUB_CLASS_BY_ENTITY_TYPE: dict[EntityType, type[AnyEntity]] = {
 }
 
 
-def _build_stub_entity(entity_type: EntityType, name: str, deps: GraphDeps) -> AnyEntity:
+def _build_stub_entity(entity_type: EntityType, name: str, deps: GraphDeps, civilization_id: str) -> AnyEntity:
     cls = _STUB_CLASS_BY_ENTITY_TYPE[entity_type]
     kwargs = dict(
         id=stable_entity_id(entity_type, name),
@@ -831,6 +1038,7 @@ def _build_stub_entity(entity_type: EntityType, name: str, deps: GraphDeps) -> A
         summary=_STUB_SUMMARY,
         generated_by_model=deps.model_name,
         ingestion_run_id=deps.run_id,
+        source_civilizations=[civilization_id],
     )
     # Only Place/Polity/Document/Concept actually vary their entity_type across
     # multiple EntityType values — Civilization/Person have it fixed already.
@@ -873,7 +1081,7 @@ async def entity_resolution(state: IngestionState, config: RunnableConfig) -> di
                 if isinstance(result, BaseException):
                     log.error("ENTITY", f"Failed to classify orphaned mention {name}", error=str(result))
                 log.info("ENTITY", f"Creating stub {entity_type.value} for orphaned mention: {name}")
-                stub = _build_stub_entity(entity_type, name, deps)
+                stub = _build_stub_entity(entity_type, name, deps, state["civilization_id"])
                 if not deps.dry_run:
                     await deps.entity_repo.upsert(stub)
                 entities[stub.id] = stub.model_dump(mode="json")
@@ -924,6 +1132,7 @@ async def generate_chunks(state: IngestionState, config: RunnableConfig) -> dict
                     chunk_type=draft.chunk_type,
                     generated_by_model=deps.model_name,
                     ingestion_run_id=deps.run_id,
+                    source_civilizations=[state["civilization_id"]],
                 )
                 chunks[chunk.id] = chunk.model_dump(mode="json")
 
@@ -936,8 +1145,6 @@ async def generate_embeddings(state: IngestionState, config: RunnableConfig) -> 
     if not chunks:
         return {}
 
-    await ensure_index_ready(deps)
-
     log.info("EMBEDDING", f"Embedding {len(chunks)} chunk(s)")
     batch_size = max(1, deps.settings.llm_concurrency) * 4  # embedding calls batch cheaply
     updated, batch_errors = await embed_and_persist_chunks(chunks, deps, batch_size)
@@ -948,7 +1155,7 @@ async def generate_embeddings(state: IngestionState, config: RunnableConfig) -> 
 async def persist_graph(state: IngestionState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     if deps.dry_run:
-        log.info("INGESTION", "Dry-run complete — nothing was written to Postgres")
+        log.info("INGESTION", "Dry-run complete — nothing was written to Firestore")
         return {}
 
     run = IngestionRun(

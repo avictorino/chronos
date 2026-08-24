@@ -2,7 +2,7 @@
 
 `IngestionState` only carries mutable working data (see spec/03). Run
 parameters (limits, dry_run, model name) and heavyweight/non-serializable
-collaborators (LLM client, repositories, Postgres connection) live in
+collaborators (LLM client, repositories, Firestore connection) live in
 `GraphDeps`, threaded through `config["configurable"]["deps"]` — never inside
 the checkpointed state itself.
 
@@ -18,7 +18,7 @@ from typing import TypedDict
 
 from app.config import Settings
 from app.llm import EmbeddingClient, LLMClient
-from app.persistence.postgres import PostgresConnection
+from app.persistence.firestore import FirestoreConnection
 from app.persistence.repositories import (
     ChunkRepository,
     ClaimRepository,
@@ -40,7 +40,7 @@ class GraphDeps:
     claim_repo: ClaimRepository
     chunk_repo: ChunkRepository
     run_repo: IngestionRunRepository
-    conn: PostgresConnection | None
+    conn: FirestoreConnection | None
     run_id: str
     model_name: str
     dry_run: bool
@@ -66,9 +66,17 @@ class IngestionState(TypedDict):
     processed_places: list[str]
     places_discovery_done: bool
 
+    pending_polities: list[dict]
+    processed_polities: list[str]
+    polities_discovery_done: bool
+
     # Subjects for extract_relationships/generate_claims/generate_chunks —
-    # populated incrementally by expand_events/expand_people/expand_places and
-    # persist_civilization. Shape: {"id", "name", "kind", "context"}.
+    # populated incrementally by expand_events/expand_people/expand_places/
+    # expand_polities and persist_civilization. Shape: {"id", "name", "kind",
+    # "context", "dates"} — "dates" (a short best-effort timeframe hint, or
+    # None) is threaded into build_relationship_extraction_prompt so
+    # relationship dates stay grounded in what's already known about the
+    # subject — see graph/nodes.py::_timeframe_hint/_person_dates_hint/_event_dates_hint.
     pending_relationship_subjects: list[dict]
     pending_claim_subjects: list[dict]
     pending_chunk_subjects: list[dict]

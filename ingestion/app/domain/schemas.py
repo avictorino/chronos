@@ -21,6 +21,13 @@ class CivilizationSeed(BaseModel):
     name: str
     approximate_start_year: int | None = None
     approximate_end_year: int | None = None
+    # 0-10 subjective importance/prominence score, used to scale how much of
+    # this civilization gets ingested (see
+    # app/services/civilization_service.py::scaled_budgets) — 10 = full
+    # MAX_*_PER_CIVILIZATION budgets (e.g. Rome, Greece, Egypt), 0 = the
+    # smallest budget floor. Defaults to 5 (mid-scale) for any civilization
+    # that doesn't set one explicitly in data/civilizations.yaml.
+    importance_score: int = Field(default=5, ge=0, le=10)
 
 
 class PeriodSummary(BaseModel):
@@ -30,12 +37,20 @@ class PeriodSummary(BaseModel):
     end_year: int | None = None
 
 
+_YEAR_FIELD_DESCRIPTION = (
+    "Astronomical year numbering: negative = BCE (e.g. -2334 for 2334 BCE), "
+    "positive = CE. Always give your own best estimate, even if only "
+    "approximate or disputed (use date_precision/confidence to flag "
+    "uncertainty) — leave null only if you genuinely have no basis to guess."
+)
+
+
 class CivilizationProfile(BaseModel):
     canonical_name: str
     alternative_names: list[str] = Field(default_factory=list)
     summary: str
-    start_year: int | None = None
-    end_year: int | None = None
+    start_year: int | None = Field(default=None, description=_YEAR_FIELD_DESCRIPTION)
+    end_year: int | None = Field(default=None, description=_YEAR_FIELD_DESCRIPTION)
     date_precision: DatePrecision = DatePrecision.APPROXIMATE
 
     regions: list[str] = Field(default_factory=list)
@@ -140,6 +155,32 @@ class PlaceProfile(BaseModel):
     confidence: float = 0.5
 
 
+class PolityCandidate(BaseModel):
+    name: str
+    short_description: str
+
+
+class PolityCandidateList(BaseModel):
+    items: list[PolityCandidate] = Field(default_factory=list)
+
+
+class PolityProfile(BaseModel):
+    canonical_name: str
+    aliases: list[str] = Field(default_factory=list)
+    summary: str
+    entity_type: Literal[
+        EntityType.POLITY, EntityType.EMPIRE, EntityType.KINGDOM, EntityType.DYNASTY
+    ] = EntityType.POLITY
+    start_year: int | None = Field(default=None, description=_YEAR_FIELD_DESCRIPTION)
+    end_year: int | None = Field(default=None, description=_YEAR_FIELD_DESCRIPTION)
+    # By-name-only mentions — feed recursive expansion (see
+    # graph/nodes.py::_enqueue_mentions), not expanded here.
+    notable_rulers: list[str] = Field(default_factory=list)
+    notable_events: list[str] = Field(default_factory=list)
+    notable_people: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+
+
 class RelationshipCandidate(BaseModel):
     source_name: str
     # Typed directly as the controlled vocabulary enum so structured output
@@ -148,8 +189,20 @@ class RelationshipCandidate(BaseModel):
     relationship_type: RelationshipType
     target_name: str
     description: str | None = None
-    start_year: int | None = None
-    end_year: int | None = None
+    start_year: int | None = Field(
+        default=None,
+        description=(
+            "Populate when this relationship type has its own timeframe "
+            "(e.g. KING_OF, RULED, MEMBER_OF_DYNASTY, CONQUERED, ATTACKED, "
+            "BESIEGED, DEFEATED, ALLY_OF, ENEMY_OF, FOUNDED, DESTROYED). "
+            + _YEAR_FIELD_DESCRIPTION
+            + " Must stay chronologically consistent with the subject's own "
+            "known timeframe given in the prompt — never invent a "
+            "relationship that would require the two sides to be "
+            "contemporaries when their known dates make that impossible."
+        ),
+    )
+    end_year: int | None = Field(default=None, description=_YEAR_FIELD_DESCRIPTION)
     confidence: float = 0.5
 
 

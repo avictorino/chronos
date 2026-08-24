@@ -2,7 +2,7 @@
 
 Firebase-hosted React app that browses/visualizes the historical knowledge graph produced by [`../ingestion`](../ingestion/README.md) — the "Google Maps + Wikipedia" layer of the Chronos platform. Live at **https://chronos-29b82.web.app**.
 
-It never talks to Postgres. It reads a read-only mirror in **Firestore**, kept up to date by `ingestion`'s `export-firestore` command (see [`../README.md`](../README.md#firestore-export-free-serverless-frontend)) — no backend/API server, no server-side rendering, just a static site + Firestore's client SDK.
+It reads **Firestore** directly — the same collections `ingestion` writes to as it runs, no intermediate database or export step (see [`../README.md`](../README.md#graph-modeled-in-firestore-not-a-native-graph-database)) — no backend/API server, no server-side rendering, just a static site + Firestore's client SDK.
 
 ## What's implemented (v1)
 

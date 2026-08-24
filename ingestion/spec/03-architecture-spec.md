@@ -32,11 +32,16 @@ LangGraph workflow (app/graph/workflow.py + nodes.py + state.py)
 | `pyyaml` | Leitura de `data/civilizations.yaml` |
 | `pytest` / `pytest-asyncio` | Testes |
 
-Gerenciado via `uv` (`uv sync`, `uv run ...`). Postgres precisa ter a extensão `vector` instalável (`CREATE EXTENSION IF NOT EXISTS vector` — `init-schema` faz isso; a imagem `pgvector/pgvector:pg16` do `docker-compose.yml` já vem com a extensão compilada).
+Gerenciado via `uv` (`uv sync`, `uv run ...`).
+
+> **Superado**: esta seção descrevia o Postgres+pgvector local, removido. A persistência
+> hoje é só Firestore (`FIREBASE_PROJECT_ID`/`GOOGLE_APPLICATION_CREDENTIALS`), sem
+> `init-schema`/`docker-compose.yml` — ver `spec/04-postgres-schema-spec.md` para o
+> registro histórico do desenho anterior.
 
 ## Variáveis de `.env`
 
-Ver `.env.example` na raiz de `ingestion/` — cobre `LLM_PROVIDER`, `OLLAMA_*`, `OPENAI_*`, `LLM_CONCURRENCY`, `POSTGRES_DSN`, `EMBEDDING_DIMENSIONS`, `MAX_*`, `ENTITY_RESOLUTION_USE_LLM`, `INGESTION_CHECKPOINT_DB_PATH`, `LOG_LEVEL`. Nunca hardcodar credenciais no código.
+Ver `.env.example` na raiz de `ingestion/` — cobre `LLM_PROVIDER`, `OLLAMA_*`, `OPENAI_*`, `LLM_CONCURRENCY`, `FIREBASE_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, `MAX_*`, `ENTITY_RESOLUTION_USE_LLM`, `INGESTION_CHECKPOINT_DB_PATH`, `LOG_LEVEL`. Nunca hardcodar credenciais no código.
 
 ## Camada LLM: `app/llm.py` (arquivo único, multi-provider)
 

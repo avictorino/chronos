@@ -67,6 +67,14 @@ class HistoricalEntity(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     ingestion_run_id: str | None = None
+    # Which civilization ingestion run(s) touched this document — an entity
+    # can legitimately be created/enriched by more than one civilization's
+    # run (cross-civilization dedup, see app/services/entity_resolution.py).
+    # Repositories merge this via Firestore ArrayUnion rather than
+    # overwriting (see app/persistence/repositories.py). Lets
+    # app/services/civilization_reset.py safely delete "civilization X's
+    # data" without touching documents another civilization still needs.
+    source_civilizations: list[str] = Field(default_factory=list)
 
 
 class Civilization(HistoricalEntity):
@@ -186,6 +194,7 @@ class HistoricalEvent(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     ingestion_run_id: str | None = None
+    source_civilizations: list[str] = Field(default_factory=list)
 
 
 class HistoricalRelationship(BaseModel):
@@ -205,6 +214,7 @@ class HistoricalRelationship(BaseModel):
 
     created_at: datetime = Field(default_factory=utcnow)
     ingestion_run_id: str | None = None
+    source_civilizations: list[str] = Field(default_factory=list)
 
 
 class HistoricalClaim(BaseModel):
@@ -224,6 +234,7 @@ class HistoricalClaim(BaseModel):
 
     created_at: datetime = Field(default_factory=utcnow)
     ingestion_run_id: str | None = None
+    source_civilizations: list[str] = Field(default_factory=list)
 
 
 class KnowledgeChunk(BaseModel):
@@ -238,6 +249,7 @@ class KnowledgeChunk(BaseModel):
 
     created_at: datetime = Field(default_factory=utcnow)
     ingestion_run_id: str | None = None
+    source_civilizations: list[str] = Field(default_factory=list)
 
 
 class IngestionError(BaseModel):

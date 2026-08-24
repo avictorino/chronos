@@ -18,7 +18,7 @@ from app.utils.logging import get_logger
 log = get_logger("event")
 
 
-async def resolve_and_persist_event(result: EventExpansion, deps: GraphDeps) -> HistoricalEvent:
+async def resolve_and_persist_event(result: EventExpansion, deps: GraphDeps, civilization_id: str) -> HistoricalEvent:
     existing = await deps.event_repo.find_candidates()
     resolution = await resolve_entity(
         result.name,
@@ -56,6 +56,7 @@ async def resolve_and_persist_event(result: EventExpansion, deps: GraphDeps) -> 
         confidence=result.confidence,
         generated_by_model=deps.model_name,
         ingestion_run_id=deps.run_id,
+        source_civilizations=[civilization_id],
     )
     if not deps.dry_run:
         await deps.event_repo.upsert(event)

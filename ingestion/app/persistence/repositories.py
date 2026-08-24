@@ -1,13 +1,28 @@
-"""Repositories — one per persisted shape, all `INSERT ... ON CONFLICT (id) DO
-UPDATE` (idempotent, same deterministic-id design as the rest of the app).
+"""Repositories — one per persisted shape, all Firestore `set(..., merge=True)`
+(idempotent, same deterministic-id design as the rest of the app).
 
 `EntityRepository` covers every `AnyEntity` subclass (Civilization, Person,
 Place, Polity, Document, Concept) uniformly — they all land in one `entities`
-table distinguished by `entity_type`, rather than one repository/table per
-subtype (spec/01: simplicity over abstraction).
+collection distinguished by `entity_type`, rather than one repository/
+collection per subtype (spec/01: simplicity over abstraction).
+
+`merge=True` everywhere is deliberate, not just idempotency: the `entities`
+collection also carries `image_url`/`image_status`/`image_generated_at`/
+`image_model`/`image_prompt_version`, written directly by the on-demand
+image-generation Cloud Function (`frontend/functions/index.js`) and never
+known to this pipeline. A plain overwrite would wipe those fields out on
+every re-ingestion. `source_civilizations` (which civilization run(s) touched
+this document — see `app/services/civilization_reset.py`) and, on entities,
+`neighbor_ids` (1-hop relationship neighbors) are merged via `ArrayUnion`
+rather than overwritten, for the same reason: a document can legitimately be
+touched by more than one civilization's ingestion run.
 """
 
 from __future__ import annotations
+
+from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+from google.cloud.firestore_v1.vector import Vector
 
 from app.domain.enums import EntityType
 from app.domain.models import (
@@ -18,194 +33,139 @@ from app.domain.models import (
     IngestionRun,
     KnowledgeChunk,
 )
-from app.persistence.postgres import PostgresConnection, vector_literal
+from app.persistence.firestore import FirestoreConnection
 from app.utils.logging import get_logger
 
-log = get_logger("postgres")
+log = get_logger("firestore")
+
+
+def _payload(model, *, extra: dict | None = None) -> dict:
+    """Common shape for every write: the full model dump, with
+    `source_civilizations` merged (not overwritten) via ArrayUnion."""
+    data = model.model_dump(mode="json")
+    source_civilizations = data.pop("source_civilizations", [])
+    data["source_civilizations"] = firestore.ArrayUnion(source_civilizations) if source_civilizations else []
+    if extra:
+        data.update(extra)
+    return data
 
 
 class EntityRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def upsert(self, entity: AnyEntity) -> None:
-        await self._conn.execute(
-            """
-            INSERT INTO entities (id, entity_type, canonical_name, aliases, data)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (id) DO UPDATE SET
-                entity_type = EXCLUDED.entity_type,
-                canonical_name = EXCLUDED.canonical_name,
-                aliases = EXCLUDED.aliases,
-                data = EXCLUDED.data
-            """,
-            entity.id,
-            entity.entity_type.value,
-            entity.canonical_name,
-            entity.aliases,
-            entity.model_dump(mode="json"),
-        )
-        log.info("POSTGRES", "Entity upserted", entity_type=entity.entity_type.value, name=entity.canonical_name)
+        doc_ref = self._conn.db.collection("entities").document(entity.id)
+        await doc_ref.set(_payload(entity), merge=True)
+        log.info("FIRESTORE", "Entity upserted", entity_type=entity.entity_type.value, name=entity.canonical_name)
 
     async def find_candidates(self, entity_type: EntityType) -> list[dict]:
-        """Always queries Postgres (never just in-memory state) — the only way
-        to reuse entities discovered by a *previous* ingestion run of a
+        """Always queries Firestore (never just in-memory state) — the only
+        way to reuse entities discovered by a *previous* ingestion run of a
         different civilization (e.g. Judah/Babylon mentioned by Assyria)."""
-        rows = await self._conn.fetch(
-            "SELECT id, canonical_name, aliases, data->>'summary' AS summary "
-            "FROM entities WHERE entity_type = $1",
-            entity_type.value,
+        query = (
+            self._conn.db.collection("entities")
+            .where(filter=FieldFilter("entity_type", "==", entity_type.value))
+            .select(["canonical_name", "aliases", "summary"])
         )
-        return [dict(r) for r in rows]
+        docs = [doc async for doc in query.stream()]
+        return [
+            {
+                "id": doc.id,
+                "canonical_name": data.get("canonical_name"),
+                "aliases": data.get("aliases") or [],
+                "summary": data.get("summary"),
+            }
+            for doc in docs
+            if (data := doc.to_dict()) is not None
+        ]
 
     async def get(self, entity_id: str) -> dict | None:
-        row = await self._conn.fetchrow("SELECT * FROM entities WHERE id = $1", entity_id)
-        return dict(row) if row else None
+        doc = await self._conn.db.collection("entities").document(entity_id).get()
+        return doc.to_dict() if doc.exists else None
 
 
 class EventRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def upsert(self, event: HistoricalEvent) -> None:
-        await self._conn.execute(
-            """
-            INSERT INTO events (id, name, aliases, data)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, aliases = EXCLUDED.aliases, data = EXCLUDED.data
-            """,
-            event.id,
-            event.name,
-            event.aliases,
-            event.model_dump(mode="json"),
-        )
-        log.info("POSTGRES", "Event upserted", name=event.name)
+        doc_ref = self._conn.db.collection("events").document(event.id)
+        await doc_ref.set(_payload(event), merge=True)
+        log.info("FIRESTORE", "Event upserted", name=event.name)
 
     async def find_candidates(self) -> list[dict]:
-        rows = await self._conn.fetch(
-            "SELECT id, name AS canonical_name, aliases, data->>'description' AS summary FROM events"
-        )
-        return [dict(r) for r in rows]
+        query = self._conn.db.collection("events").select(["name", "aliases", "description"])
+        docs = [doc async for doc in query.stream()]
+        return [
+            {
+                "id": doc.id,
+                "canonical_name": data.get("name"),
+                "aliases": data.get("aliases") or [],
+                "summary": data.get("description"),
+            }
+            for doc in docs
+            if (data := doc.to_dict()) is not None
+        ]
 
 
 class RelationshipRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def upsert(self, rel: HistoricalRelationship) -> None:
-        await self._conn.execute(
-            """
-            INSERT INTO relationships (id, source_id, target_id, relationship_type, data)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (id) DO UPDATE SET
-                source_id = EXCLUDED.source_id,
-                target_id = EXCLUDED.target_id,
-                relationship_type = EXCLUDED.relationship_type,
-                data = EXCLUDED.data
-            """,
-            rel.id,
-            rel.source_entity_id,
-            rel.target_entity_id,
-            rel.relationship_type.value,
-            rel.model_dump(mode="json"),
+        db = self._conn.db
+        batch = db.batch()
+        batch.set(db.collection("relationships").document(rel.id), _payload(rel), merge=True)
+        # Denormalized 1-hop neighbors on both sides — the most common
+        # frontend query ("what's connected to this?") becomes a single
+        # document read, no query needed. Maintained incrementally here
+        # instead of a separate post-processing export pass.
+        batch.set(
+            db.collection("entities").document(rel.source_entity_id),
+            {"neighbor_ids": firestore.ArrayUnion([rel.target_entity_id])},
+            merge=True,
         )
-        log.info("POSTGRES", "Relationship created", type=rel.relationship_type.value)
-
-    async def find_connected(self, start_id: str, max_hops: int = 4) -> list[dict]:
-        """Multi-hop traversal from `start_id`, following relationships in
-        either direction, up to `max_hops` — the WITH RECURSIVE building block
-        for the future cross-civilization exploration feature (spec/01,
-        "Assyria -> Judah -> Babylon -> Persia -> Greece"). Not wired into the
-        ingestion pipeline yet; kept deliberately simple (re-walks
-        `relationships` each step, no query-plan tuning) per project
-        philosophy — see spec/04-postgres-schema-spec.md.
-        """
-        rows = await self._conn.fetch(
-            """
-            WITH RECURSIVE traversal(id, path, depth) AS (
-                SELECT $1::text, ARRAY[$1::text], 0
-                UNION ALL
-                SELECT
-                    next_id,
-                    t.path || next_id,
-                    t.depth + 1
-                FROM traversal t
-                JOIN relationships r ON r.source_id = t.id OR r.target_id = t.id
-                CROSS JOIN LATERAL (
-                    SELECT CASE WHEN r.source_id = t.id THEN r.target_id ELSE r.source_id END AS next_id
-                ) hop
-                WHERE t.depth < $2
-                  AND NOT (hop.next_id = ANY(t.path))
-            )
-            SELECT DISTINCT id, path, depth FROM traversal WHERE depth > 0 ORDER BY depth, id
-            """,
-            start_id,
-            max_hops,
+        batch.set(
+            db.collection("entities").document(rel.target_entity_id),
+            {"neighbor_ids": firestore.ArrayUnion([rel.source_entity_id])},
+            merge=True,
         )
-        return [dict(r) for r in rows]
+        await batch.commit()
+        log.info("FIRESTORE", "Relationship created", type=rel.relationship_type.value)
 
 
 class ClaimRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def upsert(self, claim: HistoricalClaim) -> None:
-        await self._conn.execute(
-            """
-            INSERT INTO claims (id, subject_id, object_id, data)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO UPDATE SET
-                subject_id = EXCLUDED.subject_id,
-                object_id = EXCLUDED.object_id,
-                data = EXCLUDED.data
-            """,
-            claim.id,
-            claim.subject_id,
-            claim.object_id,
-            claim.model_dump(mode="json"),
-        )
-        log.info("POSTGRES", "Claim upserted", predicate=claim.predicate)
+        doc_ref = self._conn.db.collection("claims").document(claim.id)
+        await doc_ref.set(_payload(claim), merge=True)
+        log.info("FIRESTORE", "Claim upserted", predicate=claim.predicate)
 
 
 class ChunkRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def upsert(self, chunk: KnowledgeChunk) -> None:
-        embedding_literal = vector_literal(chunk.embedding) if chunk.embedding is not None else None
-        await self._conn.execute(
-            """
-            INSERT INTO chunks (id, entity_ids, chunk_type, text, embedding, data)
-            VALUES ($1, $2, $3, $4, $5::vector, $6)
-            ON CONFLICT (id) DO UPDATE SET
-                entity_ids = EXCLUDED.entity_ids,
-                chunk_type = EXCLUDED.chunk_type,
-                text = EXCLUDED.text,
-                embedding = EXCLUDED.embedding,
-                data = EXCLUDED.data
-            """,
-            chunk.id,
-            chunk.entity_ids,
-            chunk.chunk_type,
-            chunk.text,
-            embedding_literal,
-            chunk.model_dump(mode="json"),
-        )
+        payload = _payload(chunk)
+        if chunk.embedding is not None:
+            payload["embedding"] = Vector(chunk.embedding)
+        doc_ref = self._conn.db.collection("chunks").document(chunk.id)
+        await doc_ref.set(payload, merge=True)
         log.info("EMBEDDING", "Chunk embedded and linked", chunk_type=chunk.chunk_type)
 
 
 class IngestionRunRepository:
-    def __init__(self, conn: PostgresConnection) -> None:
+    def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
 
     async def save(self, run: IngestionRun) -> None:
-        await self._conn.execute(
-            """
-            INSERT INTO ingestion_runs (id, civilization_id, data)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (id) DO UPDATE SET civilization_id = EXCLUDED.civilization_id, data = EXCLUDED.data
-            """,
-            run.id,
-            run.civilization_id,
-            run.model_dump(mode="json"),
-        )
+        doc_ref = self._conn.db.collection("ingestion_runs").document(run.id)
+        # ingestion_runs isn't touched by more than one civilization by
+        # design (see civilization_id below) — plain overwrite is fine, but
+        # merge=True costs nothing and keeps the same pattern as everything
+        # else in this module.
+        await doc_ref.set(run.model_dump(mode="json"), merge=True)
