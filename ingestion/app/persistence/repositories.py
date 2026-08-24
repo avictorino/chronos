@@ -20,6 +20,8 @@ touched by more than one civilization's ingestion run.
 
 from __future__ import annotations
 
+import time
+
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1.vector import Vector
@@ -51,25 +53,75 @@ def _payload(model, *, extra: dict | None = None) -> dict:
 
 
 class EntityRepository:
+    # find_candidates() used to hit Firestore on every single call — cheap in
+    # isolation, but _resolve_name_to_id (graph/nodes.py) calls it for every
+    # EntityType against every relationship/claim source_name/target_name, so
+    # one civilization's run could re-scan the same (growing) collection
+    # hundreds of times. Measured in production: ~150 reads per write. A
+    # short TTL cache per entity_type cuts that dramatically while still
+    # refreshing periodically to see entities another concurrently-running
+    # civilization (a sibling shard process — see ingestion/scripts/) just
+    # created — see app/services/entity_resolution.py for why we can't just
+    # trust in-memory-only state instead.
+    # 45s was still too short once the collection grew into the hundreds of
+    # docs: the cache cut refresh *frequency*, but each refresh re-scans the
+    # whole (growing) collection, so cost per refresh climbs right along
+    # with it — measured in production continuing to creep back up as
+    # entities/events accumulated. _resolve_name_to_id already checks this
+    # run's in-memory state first (see graph/nodes.py), so most calls never
+    # reach here at all; a much longer TTL mainly trades a few extra minutes
+    # of staleness for seeing a sibling shard process's new entities, which
+    # is a soft nice-to-have (embedding/fuzzy resolution is already a
+    # best-effort safety net, not a guarantee — see entity_resolution.py),
+    # for a large cut in total read volume over a long-running batch.
+    _CACHE_TTL_SECONDS = 600.0
+
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
+        self._cache: dict[EntityType, tuple[float, list[dict]]] = {}
+        self._all_cache: tuple[float, list[dict]] | None = None
 
     async def upsert(self, entity: AnyEntity) -> None:
         doc_ref = self._conn.db.collection("entities").document(entity.id)
         await doc_ref.set(_payload(entity), merge=True)
         log.info("FIRESTORE", "Entity upserted", entity_type=entity.entity_type.value, name=entity.canonical_name)
+        row = {
+            "id": entity.id,
+            "canonical_name": entity.canonical_name,
+            "aliases": entity.aliases,
+            "summary": entity.summary,
+        }
+        self._cache_upsert(self._cache.get(entity.entity_type), row)
+        self._cache_upsert(self._all_cache, row)
+
+    @staticmethod
+    def _cache_upsert(cached: tuple[float, list[dict]] | None, row: dict) -> None:
+        if cached is None:
+            return  # not cached yet — the next find_*() call fetches fresh anyway
+        _, candidates = cached
+        for i, existing in enumerate(candidates):
+            if existing["id"] == row["id"]:
+                candidates[i] = row
+                return
+        candidates.append(row)
 
     async def find_candidates(self, entity_type: EntityType) -> list[dict]:
-        """Always queries Firestore (never just in-memory state) — the only
-        way to reuse entities discovered by a *previous* ingestion run of a
-        different civilization (e.g. Judah/Babylon mentioned by Assyria)."""
+        """Queries Firestore (never just in-memory state) — the only way to
+        reuse entities discovered by a *previous* ingestion run of a
+        different civilization (e.g. Judah/Babylon mentioned by Assyria) —
+        but only re-fetches every `_CACHE_TTL_SECONDS`; upsert() keeps the
+        cache current for entities created by *this* run in between."""
+        cached = self._cache.get(entity_type)
+        if cached is not None and (time.monotonic() - cached[0]) < self._CACHE_TTL_SECONDS:
+            return list(cached[1])
+
         query = (
             self._conn.db.collection("entities")
             .where(filter=FieldFilter("entity_type", "==", entity_type.value))
             .select(["canonical_name", "aliases", "summary"])
         )
         docs = [doc async for doc in query.stream()]
-        return [
+        candidates = [
             {
                 "id": doc.id,
                 "canonical_name": data.get("canonical_name"),
@@ -79,6 +131,35 @@ class EntityRepository:
             for doc in docs
             if (data := doc.to_dict()) is not None
         ]
+        self._cache[entity_type] = (time.monotonic(), candidates)
+        return list(candidates)
+
+    async def find_all_candidates(self) -> list[dict]:
+        """Every entity regardless of type, in one query — used by
+        graph/nodes.py::_resolve_name_to_id, which needs to check a bare
+        mentioned name against every entity type at once (a relationship
+        target could be a person, place, polity, document, concept, or even
+        a civilization). Replaces what used to be up to 6 separate
+        find_candidates() calls per name — measured in production as the
+        single biggest source of Firestore read cost (~150 reads per write
+        before this + the cache above). Same TTL-cache treatment."""
+        if self._all_cache is not None and (time.monotonic() - self._all_cache[0]) < self._CACHE_TTL_SECONDS:
+            return list(self._all_cache[1])
+
+        query = self._conn.db.collection("entities").select(["canonical_name", "aliases", "summary"])
+        docs = [doc async for doc in query.stream()]
+        candidates = [
+            {
+                "id": doc.id,
+                "canonical_name": data.get("canonical_name"),
+                "aliases": data.get("aliases") or [],
+                "summary": data.get("summary"),
+            }
+            for doc in docs
+            if (data := doc.to_dict()) is not None
+        ]
+        self._all_cache = (time.monotonic(), candidates)
+        return list(candidates)
 
     async def get(self, entity_id: str) -> dict | None:
         doc = await self._conn.db.collection("entities").document(entity_id).get()
@@ -86,18 +167,44 @@ class EntityRepository:
 
 
 class EventRepository:
+    # 45s was still too short once the collection grew into the hundreds of
+    # docs: the cache cut refresh *frequency*, but each refresh re-scans the
+    # whole (growing) collection, so cost per refresh climbs right along
+    # with it — measured in production continuing to creep back up as
+    # entities/events accumulated. _resolve_name_to_id already checks this
+    # run's in-memory state first (see graph/nodes.py), so most calls never
+    # reach here at all; a much longer TTL mainly trades a few extra minutes
+    # of staleness for seeing a sibling shard process's new entities, which
+    # is a soft nice-to-have (embedding/fuzzy resolution is already a
+    # best-effort safety net, not a guarantee — see entity_resolution.py),
+    # for a large cut in total read volume over a long-running batch.
+    _CACHE_TTL_SECONDS = 600.0  # see EntityRepository — same reasoning
+
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
+        self._cache: tuple[float, list[dict]] | None = None
 
     async def upsert(self, event: HistoricalEvent) -> None:
         doc_ref = self._conn.db.collection("events").document(event.id)
         await doc_ref.set(_payload(event), merge=True)
         log.info("FIRESTORE", "Event upserted", name=event.name)
+        if self._cache is not None:
+            _, candidates = self._cache
+            row = {"id": event.id, "canonical_name": event.name, "aliases": event.aliases, "summary": event.description}
+            for i, existing in enumerate(candidates):
+                if existing["id"] == event.id:
+                    candidates[i] = row
+                    break
+            else:
+                candidates.append(row)
 
     async def find_candidates(self) -> list[dict]:
+        if self._cache is not None and (time.monotonic() - self._cache[0]) < self._CACHE_TTL_SECONDS:
+            return list(self._cache[1])
+
         query = self._conn.db.collection("events").select(["name", "aliases", "description"])
         docs = [doc async for doc in query.stream()]
-        return [
+        candidates = [
             {
                 "id": doc.id,
                 "canonical_name": data.get("name"),
@@ -107,6 +214,8 @@ class EventRepository:
             for doc in docs
             if (data := doc.to_dict()) is not None
         ]
+        self._cache = (time.monotonic(), candidates)
+        return list(candidates)
 
 
 class RelationshipRepository:

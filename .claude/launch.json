@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"],
       "port": 5173
+    },
+    {
+      "name": "chronos-frontend-emulated",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev:emulated", "--", "--host", "127.0.0.1", "--port", "5174"],
+      "port": 5174
     }
   ]
 }

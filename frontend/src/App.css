@@ -643,3 +643,343 @@
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* ---------- race mode (multiplayer graph race) ----------
+   Mobile-first: this is a full-screen takeover (not the desktop 3-column
+   .body grid above), sized in relative units from the start since it's the
+   surface going to phones — see the plan's "Layout mobile" section. */
+.go-button {
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #14110a;
+  border: none;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.go-button:hover {
+  background: #e6b968;
+}
+
+.race-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+  overflow-y: auto;
+}
+.race-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+}
+.race-close:hover {
+  color: var(--text);
+}
+
+.race-panel {
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
+}
+
+.race-active {
+  width: 100%;
+  align-self: stretch;
+  max-width: 560px;
+  min-height: min(80vh, 640px);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.race-hud {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.race-hud-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.race-hud-stat-right {
+  margin-left: auto;
+  text-align: right;
+}
+.race-hud-label {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.race-hud-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.race-hud-timer {
+  flex: 0 0 auto;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.race-graph-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.race-graph-svg {
+  width: 100%;
+  height: 100%;
+  max-height: 70vh;
+}
+.race-graph-edge {
+  stroke: var(--border);
+  stroke-width: 1.6;
+}
+.race-graph-node {
+  cursor: pointer;
+}
+.race-graph-current {
+  cursor: default;
+}
+.race-graph-neighbor.is-disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.race-graph-label {
+  text-anchor: middle;
+  font-family: var(--sans);
+  font-size: 11px;
+  fill: var(--text-dim);
+}
+.race-graph-current-label {
+  font-weight: 600;
+  fill: var(--text);
+}
+.race-graph-target-tag {
+  text-anchor: middle;
+  font-size: 11px;
+  fill: var(--accent);
+  font-weight: 600;
+}
+.race-move-error {
+  text-align: center;
+}
+
+.race-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13.5px;
+}
+.race-result-row:last-of-type {
+  border-bottom: none;
+}
+.race-result-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.race-result-actions .race-btn-primary,
+.race-result-actions .race-btn-secondary {
+  flex: 1;
+  padding: 11px 0;
+}
+
+.race-leaderboard-panel {
+  max-width: 480px;
+}
+.race-leaderboard-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.race-leaderboard-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+.race-leaderboard-rank {
+  flex: 0 0 20px;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.race-leaderboard-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.race-leaderboard-wins {
+  color: var(--accent);
+  white-space: nowrap;
+}
+.race-leaderboard-extra {
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.race-leaderboard-back {
+  margin-top: 14px;
+  width: 100%;
+}
+.race-username-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.race-username-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+}
+.race-username-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.race-btn-primary {
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #14110a;
+  border: none;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 0 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.race-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.race-btn-secondary {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.race-error {
+  color: var(--conf-low);
+  font-size: 12px;
+  margin-top: 10px;
+}
+.race-username-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.race-suggestion-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 7px 11px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.race-suggestion-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.race-pair-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.race-pair-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-family: var(--sans);
+  cursor: pointer;
+  text-align: left;
+}
+.race-pair-option:hover {
+  border-color: var(--accent);
+}
+.race-pair-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.race-pair-hops {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.race-countdown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.race-countdown-number {
+  font-family: var(--serif);
+  font-size: min(28vw, 140px);
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
