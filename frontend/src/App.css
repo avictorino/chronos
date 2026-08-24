@@ -568,14 +568,28 @@
   outline-offset: 1px;
   opacity: 1;
 }
-.chrono-year-marker {
+/* Video-editor-style playhead marking the selected entity's own estimated
+   year on the chronology — separate from (and always shown alongside) the
+   .selected/.nearest row highlight, which marks the closest *row*; this
+   marks the exact *point in time*, whether or not that lines up with one. */
+.chrono-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 2px dashed var(--accent);
-  opacity: 0.6;
+  border-left: 2px solid #e0524f;
+  z-index: 3;
   pointer-events: none;
+}
+.chrono-playhead-flag {
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #e0524f;
 }
 .chrono-bar {
   position: absolute;

@@ -55,7 +55,9 @@ function findNearestRow(dated, targetYear, selfId) {
  * this centers the strip on whichever row is the closest chronological
  * match — the entity's own row if it's a plotted civilization/polity,
  * otherwise the row whose date range best matches its estimated year (e.g.
- * a person's birth/death date), marked with a dashed year line either way. */
+ * a person's birth/death date) — and drops a video-editor-style red
+ * playhead at the entity's own estimated year, always, regardless of
+ * whether that lines up with a plotted row. */
 export default function HorizontalTimeline({ entity, onSelectEntity }) {
   const { status, items } = useCivilizations();
   const scrollRef = useRef(null);
@@ -144,12 +146,14 @@ export default function HorizontalTimeline({ entity, onSelectEntity }) {
                 );
               })}
             </div>
-            {targetYear != null && nearestId != null && nearestId !== entity?.id && (
+            {targetYear != null && (
               <div
-                className="chrono-year-marker"
+                className="chrono-playhead"
                 style={{ left: scale(targetYear) }}
                 title={`${entity?.canonical_name ?? "Selecionado"} — ~${formatYearRange(targetYear, null)}`}
-              />
+              >
+                <div className="chrono-playhead-flag" />
+              </div>
             )}
           </div>
         </div>
