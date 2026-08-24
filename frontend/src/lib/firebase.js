@@ -12,8 +12,9 @@
 
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported as isAnalyticsSupported } from "firebase/analytics";
-import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBf6NlV4P7whWepKW0BOJKDelpGLa1zEPA",
@@ -33,10 +34,30 @@ export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
 // Used for the on-demand entity-portrait generator (see
-// src/lib/functions.js and functions/index.js) — the only write path in
-// this app, and it never runs on the client: it's a callable Cloud
-// Function, the OpenAI key lives server-side only.
+// src/lib/functions.js and functions/index.js) and the race-mode callables
+// (see src/lib/race.js and functions/index.js) — the only write paths in
+// this app, and they never run on the client: they're callable Cloud
+// Functions, secrets/admin access live server-side only.
 export const functions = getFunctions(app);
+
+// Anonymous identity for race mode (see src/hooks/useAuthUser.js) — no
+// login UI, just a stable per-browser uid used to own a `users/{uid}` doc
+// and to authorize `submitMove`/etc. calls server-side.
+export const auth = getAuth(app);
+
+// Opt-in (VITE_USE_EMULATORS=true), not automatic on every `npm run dev`:
+// the existing app is read-only against the real chronos-29b82 project and
+// that keeps working with zero setup. Race mode is the first feature with
+// real writes exposed to strangers on the internet, so *while building it*
+// point at the local Firebase Emulator Suite instead — run
+// `firebase emulators:start` from this directory, then
+// `VITE_USE_EMULATORS=true npm run dev` — rather than exercising matchmaking
+// races against production.
+if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === "true") {
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
 
 // Analytics only works in a browser (no-op under SSR/build) and isn't
 // supported in every environment — guard it instead of calling

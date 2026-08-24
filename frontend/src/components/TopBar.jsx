@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { IconColumns, IconSearch } from "./icons";
 import { searchEntitiesByName } from "../lib/firestore";
 
-export default function TopBar({ onSelectEntity }) {
+export default function TopBar({ onSelectEntity, onOpenRace }) {
   const [term, setTerm] = useState("");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -67,6 +67,9 @@ export default function TopBar({ onSelectEntity }) {
         )}
       </label>
 
+      <button className="go-button" onClick={onOpenRace}>
+        GO
+      </button>
       <div className="avatar" />
     </header>
   );

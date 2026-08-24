@@ -7,6 +7,8 @@ import KnowledgeGraph from "./components/KnowledgeGraph";
 import HorizontalTimeline from "./components/HorizontalTimeline";
 import RelationshipTypes from "./components/RelationshipTypes";
 import useEntityDetail from "./hooks/useEntityDetail";
+import useAuthUser from "./hooks/useAuthUser";
+import RaceApp from "./components/race/RaceApp";
 
 /** Reads `?entity=<id>` from the URL once, on first paint — the permalink
  * a shared/bookmarked link resolves to. */
@@ -18,6 +20,11 @@ function entityIdFromUrl() {
 export default function App() {
   const [selectedEntityId, setSelectedEntityId] = useState(entityIdFromUrl);
   const { status, entity, neighbors, claims } = useEntityDetail(selectedEntityId);
+  const [raceOpen, setRaceOpen] = useState(false);
+  // Kicked off here (not lazily inside race mode) so the anonymous session
+  // is already established by the time the player clicks "GO" — see
+  // src/hooks/useAuthUser.js.
+  useAuthUser();
 
   // Keep the URL in sync with the selection so the address bar is always a
   // valid permalink to what's on screen — replaceState (not push) so
@@ -31,7 +38,8 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar onSelectEntity={setSelectedEntityId} />
+      <TopBar onSelectEntity={setSelectedEntityId} onOpenRace={() => setRaceOpen(true)} />
+      {raceOpen && <RaceApp onClose={() => setRaceOpen(false)} />}
       <div className="body">
         <Rail />
         <div className="left-col">
