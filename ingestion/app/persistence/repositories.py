@@ -20,6 +20,8 @@ touched by more than one civilization's ingestion run.
 
 from __future__ import annotations
 
+import time
+
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1.vector import Vector
@@ -51,25 +53,62 @@ def _payload(model, *, extra: dict | None = None) -> dict:
 
 
 class EntityRepository:
+    # find_candidates() used to hit Firestore on every single call — cheap in
+    # isolation, but _resolve_name_to_id (graph/nodes.py) calls it for every
+    # EntityType against every relationship/claim source_name/target_name, so
+    # one civilization's run could re-scan the same (growing) collection
+    # hundreds of times. Measured in production: ~150 reads per write. A
+    # short TTL cache per entity_type cuts that dramatically while still
+    # refreshing periodically to see entities another concurrently-running
+    # civilization (a sibling shard process — see ingestion/scripts/) just
+    # created — see app/services/entity_resolution.py for why we can't just
+    # trust in-memory-only state instead.
+    _CACHE_TTL_SECONDS = 45.0
+
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
+        self._cache: dict[EntityType, tuple[float, list[dict]]] = {}
 
     async def upsert(self, entity: AnyEntity) -> None:
         doc_ref = self._conn.db.collection("entities").document(entity.id)
         await doc_ref.set(_payload(entity), merge=True)
         log.info("FIRESTORE", "Entity upserted", entity_type=entity.entity_type.value, name=entity.canonical_name)
+        self._cache_upsert(entity)
+
+    def _cache_upsert(self, entity: AnyEntity) -> None:
+        cached = self._cache.get(entity.entity_type)
+        if cached is None:
+            return  # not cached yet — the next find_candidates() call fetches fresh anyway
+        _, candidates = cached
+        row = {
+            "id": entity.id,
+            "canonical_name": entity.canonical_name,
+            "aliases": entity.aliases,
+            "summary": entity.summary,
+        }
+        for i, existing in enumerate(candidates):
+            if existing["id"] == entity.id:
+                candidates[i] = row
+                return
+        candidates.append(row)
 
     async def find_candidates(self, entity_type: EntityType) -> list[dict]:
-        """Always queries Firestore (never just in-memory state) — the only
-        way to reuse entities discovered by a *previous* ingestion run of a
-        different civilization (e.g. Judah/Babylon mentioned by Assyria)."""
+        """Queries Firestore (never just in-memory state) — the only way to
+        reuse entities discovered by a *previous* ingestion run of a
+        different civilization (e.g. Judah/Babylon mentioned by Assyria) —
+        but only re-fetches every `_CACHE_TTL_SECONDS`; upsert() keeps the
+        cache current for entities created by *this* run in between."""
+        cached = self._cache.get(entity_type)
+        if cached is not None and (time.monotonic() - cached[0]) < self._CACHE_TTL_SECONDS:
+            return list(cached[1])
+
         query = (
             self._conn.db.collection("entities")
             .where(filter=FieldFilter("entity_type", "==", entity_type.value))
             .select(["canonical_name", "aliases", "summary"])
         )
         docs = [doc async for doc in query.stream()]
-        return [
+        candidates = [
             {
                 "id": doc.id,
                 "canonical_name": data.get("canonical_name"),
@@ -79,6 +118,8 @@ class EntityRepository:
             for doc in docs
             if (data := doc.to_dict()) is not None
         ]
+        self._cache[entity_type] = (time.monotonic(), candidates)
+        return list(candidates)
 
     async def get(self, entity_id: str) -> dict | None:
         doc = await self._conn.db.collection("entities").document(entity_id).get()
@@ -86,18 +127,33 @@ class EntityRepository:
 
 
 class EventRepository:
+    _CACHE_TTL_SECONDS = 45.0  # see EntityRepository — same reasoning
+
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
+        self._cache: tuple[float, list[dict]] | None = None
 
     async def upsert(self, event: HistoricalEvent) -> None:
         doc_ref = self._conn.db.collection("events").document(event.id)
         await doc_ref.set(_payload(event), merge=True)
         log.info("FIRESTORE", "Event upserted", name=event.name)
+        if self._cache is not None:
+            _, candidates = self._cache
+            row = {"id": event.id, "canonical_name": event.name, "aliases": event.aliases, "summary": event.description}
+            for i, existing in enumerate(candidates):
+                if existing["id"] == event.id:
+                    candidates[i] = row
+                    break
+            else:
+                candidates.append(row)
 
     async def find_candidates(self) -> list[dict]:
+        if self._cache is not None and (time.monotonic() - self._cache[0]) < self._CACHE_TTL_SECONDS:
+            return list(self._cache[1])
+
         query = self._conn.db.collection("events").select(["name", "aliases", "description"])
         docs = [doc async for doc in query.stream()]
-        return [
+        candidates = [
             {
                 "id": doc.id,
                 "canonical_name": data.get("name"),
@@ -107,6 +163,8 @@ class EventRepository:
             for doc in docs
             if (data := doc.to_dict()) is not None
         ]
+        self._cache = (time.monotonic(), candidates)
+        return list(candidates)
 
 
 class RelationshipRepository:
