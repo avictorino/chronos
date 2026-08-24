@@ -843,21 +843,15 @@ async def expand_polities(state: IngestionState, config: RunnableConfig) -> Comm
 
 # --- name resolution shared by extract_relationships/generate_claims -----------
 
-_NAME_RESOLUTION_TYPES = [
-    EntityType.PERSON,
-    EntityType.PLACE,
-    EntityType.POLITY,
-    EntityType.DOCUMENT,
-    EntityType.CONCEPT,
-]
-
 
 async def _resolve_name_to_id(name: str, state: IngestionState, deps: GraphDeps) -> str | None:
     """Resolves a bare name (as mentioned in a relationship/claim) to an
     already-known entity/event id. Checks this run's in-memory state first
-    (cheap), then falls back to Firestore across the likely entity types plus
-    events. Returns None if nothing sufficiently similar is found — the
-    caller queues the name for the final `entity_resolution` stub sweep."""
+    (cheap), then falls back to Firestore — one query across every entity
+    type at once (a mentioned name could be a person, place, polity,
+    document, concept, or civilization) plus one for events. Returns None if
+    nothing sufficiently similar is found — the caller queues the name for
+    the final `entity_resolution` stub sweep."""
     needle = name.strip().lower()
     if not needle:
         return None
@@ -871,11 +865,9 @@ async def _resolve_name_to_id(name: str, state: IngestionState, deps: GraphDeps)
         if any(p.strip().lower() == needle for p in pool):
             return event["id"]
 
-    for entity_type in _NAME_RESOLUTION_TYPES:
-        candidates = await deps.entity_repo.find_candidates(entity_type)
-        if not candidates:
-            continue
-        resolution = await resolve_entity(name, [], candidates, deps.embedding_client, deps.llm_client)
+    entity_candidates = await deps.entity_repo.find_all_candidates()
+    if entity_candidates:
+        resolution = await resolve_entity(name, [], entity_candidates, deps.embedding_client, deps.llm_client)
         if resolution.action == "merge" and resolution.existing_entity_id:
             return resolution.existing_entity_id
 

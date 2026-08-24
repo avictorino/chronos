@@ -70,6 +70,17 @@ class InMemoryEntityRepo:
             if e.get("entity_type") == entity_type.value
         ]
 
+    async def find_all_candidates(self) -> list[dict]:
+        return [
+            {
+                "id": e["id"],
+                "canonical_name": e["canonical_name"],
+                "aliases": e.get("aliases", []),
+                "summary": e.get("summary"),
+            }
+            for e in self.by_id.values()
+        ]
+
     async def get(self, entity_id: str) -> dict | None:
         return self.by_id.get(entity_id)
 

@@ -68,26 +68,28 @@ class EntityRepository:
     def __init__(self, conn: FirestoreConnection) -> None:
         self._conn = conn
         self._cache: dict[EntityType, tuple[float, list[dict]]] = {}
+        self._all_cache: tuple[float, list[dict]] | None = None
 
     async def upsert(self, entity: AnyEntity) -> None:
         doc_ref = self._conn.db.collection("entities").document(entity.id)
         await doc_ref.set(_payload(entity), merge=True)
         log.info("FIRESTORE", "Entity upserted", entity_type=entity.entity_type.value, name=entity.canonical_name)
-        self._cache_upsert(entity)
-
-    def _cache_upsert(self, entity: AnyEntity) -> None:
-        cached = self._cache.get(entity.entity_type)
-        if cached is None:
-            return  # not cached yet — the next find_candidates() call fetches fresh anyway
-        _, candidates = cached
         row = {
             "id": entity.id,
             "canonical_name": entity.canonical_name,
             "aliases": entity.aliases,
             "summary": entity.summary,
         }
+        self._cache_upsert(self._cache.get(entity.entity_type), row)
+        self._cache_upsert(self._all_cache, row)
+
+    @staticmethod
+    def _cache_upsert(cached: tuple[float, list[dict]] | None, row: dict) -> None:
+        if cached is None:
+            return  # not cached yet — the next find_*() call fetches fresh anyway
+        _, candidates = cached
         for i, existing in enumerate(candidates):
-            if existing["id"] == entity.id:
+            if existing["id"] == row["id"]:
                 candidates[i] = row
                 return
         candidates.append(row)
@@ -119,6 +121,33 @@ class EntityRepository:
             if (data := doc.to_dict()) is not None
         ]
         self._cache[entity_type] = (time.monotonic(), candidates)
+        return list(candidates)
+
+    async def find_all_candidates(self) -> list[dict]:
+        """Every entity regardless of type, in one query — used by
+        graph/nodes.py::_resolve_name_to_id, which needs to check a bare
+        mentioned name against every entity type at once (a relationship
+        target could be a person, place, polity, document, concept, or even
+        a civilization). Replaces what used to be up to 6 separate
+        find_candidates() calls per name — measured in production as the
+        single biggest source of Firestore read cost (~150 reads per write
+        before this + the cache above). Same TTL-cache treatment."""
+        if self._all_cache is not None and (time.monotonic() - self._all_cache[0]) < self._CACHE_TTL_SECONDS:
+            return list(self._all_cache[1])
+
+        query = self._conn.db.collection("entities").select(["canonical_name", "aliases", "summary"])
+        docs = [doc async for doc in query.stream()]
+        candidates = [
+            {
+                "id": doc.id,
+                "canonical_name": data.get("canonical_name"),
+                "aliases": data.get("aliases") or [],
+                "summary": data.get("summary"),
+            }
+            for doc in docs
+            if (data := doc.to_dict()) is not None
+        ]
+        self._all_cache = (time.monotonic(), candidates)
         return list(candidates)
 
     async def get(self, entity_id: str) -> dict | None:
