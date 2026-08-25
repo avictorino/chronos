@@ -1,15 +1,14 @@
 @echo off
-REM Runs half of data/civilizations.yaml (index i %% 2 == 0 — includes
-REM Assyria at index 0 and Sumer at index 2). Runs alongside
-REM import_shard1.bat at the same time, each in its own process with its
-REM own checkpoint DB, so both keep Ollama's OLLAMA_NUM_PARALLEL=2 slots
-REM busy (measured: this was the best-performing setup — 4 parallel
-REM processes tested worse in practice, ~3x less aggregate throughput, see
-REM ingestion/scripts/README.md). --continue: skip civilizations already
-REM fully imported, resume the last interrupted one automatically, start
-REM the next fresh one otherwise — safe to run repeatedly, never redoes
-REM finished work.
+REM Part of a 4-way parallel split (see ingestion/scripts/README.md).
+REM Covers civilizations at index i %% 4 == 0 — includes Assyria (index 0).
+REM Runs alongside import_shard1.bat/2.bat/3.bat, each in its own process
+REM with its own checkpoint DB, so all four keep Ollama's
+REM OLLAMA_NUM_PARALLEL=4 slots busy. Being re-tested with qwen3.5:4b (much
+REM smaller than the gemma4:12b used when 4-parallel first measured worse
+REM than 2 — see README.md; if this regresses again, drop back to 3 or 2).
+REM --continue: skip civilizations already fully imported, resume the last
+REM interrupted one automatically, start the next fresh one otherwise.
 cd /d "C:\Users\adema\OneDrive\Documentos\chronos\ingestion"
 set INGESTION_CHECKPOINT_DB_PATH=.data\checkpoints_shard0.db
 set LLM_CONCURRENCY=1
-"C:\Users\adema\.local\bin\uv.exe" run python -m app.main ingest --all --continue --shard 0/2 >> logs\shard0.log 2>&1
+"C:\Users\adema\.local\bin\uv.exe" run python -m app.main ingest --all --continue --shard 0/4 >> logs\shard0.log 2>&1

@@ -8,6 +8,7 @@ import HorizontalTimeline from "./components/HorizontalTimeline";
 import RelationshipTypes from "./components/RelationshipTypes";
 import useEntityDetail from "./hooks/useEntityDetail";
 import useAuthUser from "./hooks/useAuthUser";
+import useCivilizations from "./hooks/useCivilizations";
 import RaceApp from "./components/race/RaceApp";
 
 /** Reads `?entity=<id>` from the URL once, on first paint — the permalink
@@ -25,6 +26,32 @@ export default function App() {
   // is already established by the time the player clicks "GO" — see
   // src/hooks/useAuthUser.js.
   useAuthUser();
+
+  // Landing default: a fresh visit with no `?entity=` in the URL used to
+  // show an empty "pick something" state — now it shows a real
+  // civilization instead, so there's something to look at immediately.
+  // Picks a well-connected one that actually has a real profile (not an
+  // auto-created stub), among the civilization/polity-type entities
+  // useCivilizations() already loads for the chronology strip. Only ever
+  // fires once: it's a no-op the moment anything gets selected, from the
+  // URL or otherwise.
+  const { status: civStatus, items: civilizations } = useCivilizations();
+  useEffect(() => {
+    if (selectedEntityId || civStatus !== "ready" || civilizations.length === 0) return;
+    const profiled = civilizations.filter((c) => c.summary && !c.summary.startsWith("Auto-created stub"));
+    const pool = profiled.length > 0 ? profiled : civilizations;
+    // Well-connected, but capped: KnowledgeGraph defaults to a clean 1-hop
+    // view specifically to avoid a tangled first impression (see its
+    // comments) — picking the single *most* connected civilization here
+    // (sometimes 100+ neighbors) would land straight back in that mess.
+    const reasonable = pool.filter((c) => (c.neighbor_ids?.length ?? 0) <= 40);
+    const candidates = reasonable.length > 0 ? reasonable : pool;
+    const featured = candidates.reduce(
+      (best, item) => ((item.neighbor_ids?.length ?? 0) > (best?.neighbor_ids?.length ?? -1) ? item : best),
+      null
+    );
+    if (featured) setSelectedEntityId(featured.id);
+  }, [selectedEntityId, civStatus, civilizations]);
 
   // Keep the URL in sync with the selection so the address bar is always a
   // valid permalink to what's on screen — replaceState (not push) so
